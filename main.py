@@ -1,23 +1,27 @@
 import io
+import json
+import os
 import tokenize
 from unidiff import PatchSet
 
-from github import search_repos, get_commits, get_commit
+from github import search_repos, get_repo_commits, get_commit
 from rich.console import Console
 from concurrent.futures import ThreadPoolExecutor
 
 console = Console()
 
+MAX_WORKERS = 20
+
 CUTOFF_DATE = "2026-01-01"
 
-example_comment = {
-    "repo_owner": "Bob",
-    "repo_name": "cool-project",
-    "filepath": "src/main.py",
-    "comment": "# This is a comment",
-    "start_line": 1,
-    "end_line": 1,
-}
+# example_comment = {
+#     "repo_owner": "Bob",
+#     "repo_name": "cool-project",
+#     "filepath": "src/main.py",
+#     "comment": "# This is a comment",
+#     "start_line": 1,
+#     "end_line": 1,
+# }
 
 comments = []
 
@@ -113,22 +117,53 @@ def get_comments_from_patch(filepath: str, patch: str) -> list[dict]:
 
     return comment_blocks
 
+def save_to_json(data: list[dict], filename: str):
+    os.makedirs("data", exist_ok=True)
+    with open(f"data/{filename}.json", "w") as f:
+        json.dump(data, f, indent=2)
 
-repo_search_results = search_repos(pushed_after=CUTOFF_DATE)
+def main():
+    repo_search_results = search_repos(pushed_after=CUTOFF_DATE)
 
-print("Total repositories found:", len(repo_search_results))
+    print("Total repositories found:", len(repo_search_results))
 
-for repo in repo_search_results[3:10]:
-    commits = get_commits(repo["name"], repo["owner"]["login"], since=CUTOFF_DATE)
-    print(f"{len(commits)} commits found in {repo['name']}")
+    repos = repo_search_results[3:10] # only get some of the repos to save time
 
-    for commit in commits:
-        commit_details = get_commit(repo["owner"]["login"], repo["name"], commit["sha"])
-        for file in commit_details["files"]:
-            comments.extend(get_comments_from_patch(file["filename"], file["patch"]))
-    
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        repo_commits = list[tuple[dict, list[dict]]](
+            executor.map(
+                lambda repo: (
+                    repo,
+                    get_repo_commits(repo["name"], repo["owner"]["login"], since=CUTOFF_DATE),
+                ),
+                repos,
+            )
+        )
+
+        for repo, commits in repo_commits:
+            print(f"{len(commits)} commits found in {repo['name']}")
+            detailed_repo_commits = list[dict](executor.map(
+                lambda commit: get_commit(repo["owner"]["login"], repo["name"], commit["sha"]),
+                commits[:100], # only get the first 10 commits for each repo to save time
+            ))
+            for commit in detailed_repo_commits:
+                for file in commit["files"]:
+                    filepath = file["filename"]
+                    is_python_file = filepath.endswith(".py")
+                    if not is_python_file:
+                        continue
+                    patch = file.get("patch")
+                    if not patch:
+                        continue
+                    commit_comments = get_comments_from_patch(filepath, patch)
+                    for comment in commit_comments:
+                        comment["repo_owner"] = repo["owner"]["login"]
+                        comment["repo_name"] = repo["name"]
+                    comments.extend(commit_comments)
 
 if __name__ == "__main__":
+    main()
+    save_to_json(comments, "comments")
     print("Total comments found:", len(comments))
     for comment in comments[:10]:
         print("Comment:\n", comment["comment"])

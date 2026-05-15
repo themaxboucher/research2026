@@ -17,7 +17,7 @@ def _github_api_headers() -> dict[str, str]:
         headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
     return headers
 
-def search_repos(language: str = "Python", min_stars: int = 10_000, pushed_after: str = "2026-01-01") -> dict:
+def search_repos(language: str = "Python", min_stars: int = 10_000, pushed_after: str = "2026-01-01") -> list[dict]:
     repos: list[dict] = []
     url_query = f"is:public+template:false+archived:false+language:{language}+stars:>={min_stars}+pushed:>{pushed_after}"
     url_sort = "sort=stars&order=desc"
@@ -31,9 +31,9 @@ def search_repos(language: str = "Python", min_stars: int = 10_000, pushed_after
         url = response.links.get("next", {}).get("url")
     return repos
 
-def get_commits(repo_name: str, repo_owner: str, since: str = "2026-01-01") -> list[dict]:
+def get_repo_commits(repo_name: str, repo_owner: str, since: str = "2026-01-01") -> list[dict]:
     commits: list[dict] = []
-    url_since = f"since:{since}"
+    url_since = f"since={since}"
     url_per_page = "per_page=100"
     url: str | None = f"https://api.github.com/repos/{repo_owner}/{repo_name}/commits?{url_since}&{url_per_page}"
     while url:
