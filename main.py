@@ -4,8 +4,9 @@ import os
 import tokenize
 from unidiff import PatchSet
 
-from github import search_repos, get_repo_commits, get_commit
+from github import search_repos, get_repo_commits, get_commit, get_file_contents
 from rich.console import Console
+from rich.syntax import Syntax
 from concurrent.futures import ThreadPoolExecutor
 
 console = Console()
@@ -24,6 +25,7 @@ CUTOFF_DATE = "2026-01-01"
 # }
 
 comments = []
+files = []
 
 def get_comments_from_patch(filepath: str, patch: str) -> list[dict]:
     # add header so the patch can be parsed by unidiff
@@ -117,10 +119,40 @@ def get_comments_from_patch(filepath: str, patch: str) -> list[dict]:
 
     return comment_blocks
 
+def strip_comments_from_file(file_content: str) -> str:
+    tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
+
+    lines = file_content.splitlines(keepends=True)
+    for tok in tokens:
+        if tok.type != tokenize.COMMENT:
+            continue
+        row, col = tok.start
+        line = lines[row - 1]
+        lines[row - 1] = line[:col].rstrip() + "\n"
+
+    return "".join(lines)
+
 def save_to_json(data: list[dict], filename: str):
     os.makedirs("data", exist_ok=True)
     with open(f"data/{filename}.json", "w") as f:
         json.dump(data, f, indent=2)
+
+def process_commit_file(repo: dict, commit: dict, file: dict) -> dict | None:
+    if file.get("status") == "removed":
+        return None
+    filepath = file["filename"]
+    is_python_file = filepath.endswith(".py")
+    if not is_python_file:
+        return None
+    patch = file.get("patch")
+    if not patch:
+        return None
+    commit_comments = get_comments_from_patch(filepath, patch)
+    for comment in commit_comments:
+        comment["repo_owner"] = repo["owner"]["login"]
+        comment["repo_name"] = repo["name"]
+    comments.extend(commit_comments)
+    return get_file_contents(repo["owner"]["login"], repo["name"], filepath, commit["sha"])
 
 def main():
     repo_search_results = search_repos(pushed_after=CUTOFF_DATE)
@@ -144,32 +176,36 @@ def main():
             print(f"{len(commits)} commits found in {repo['name']}")
             detailed_repo_commits = list[dict](executor.map(
                 lambda commit: get_commit(repo["owner"]["login"], repo["name"], commit["sha"]),
-                commits[:100], # only get the first 10 commits for each repo to save time
+                commits[:20], # only get the first 20 commits to save time
             ))
             for commit in detailed_repo_commits:
-                for file in commit["files"]:
-                    filepath = file["filename"]
-                    is_python_file = filepath.endswith(".py")
-                    if not is_python_file:
-                        continue
-                    patch = file.get("patch")
-                    if not patch:
-                        continue
-                    commit_comments = get_comments_from_patch(filepath, patch)
-                    for comment in commit_comments:
-                        comment["repo_owner"] = repo["owner"]["login"]
-                        comment["repo_name"] = repo["name"]
-                    comments.extend(commit_comments)
+                files_contents = list[dict](executor.map(
+                    lambda file: process_commit_file(repo, commit, file),
+                    commit["files"],
+                ))
+                for file_content in files_contents:
+                    if file_content:
+                        file_info = {
+                            "repo_owner": repo["owner"]["login"],
+                            "repo_name": repo["name"],
+                            "filepath": file_content["path"],
+                            "sha": commit["sha"],
+                            "content": file_content["content"],
+                            "content_without_comments": strip_comments_from_file(file_content["content"]),
+                        }
+                        files.append(file_info)
 
 if __name__ == "__main__":
     main()
     save_to_json(comments, "comments")
+    save_to_json(files, "files")
     print("Total comments found:", len(comments))
-    for comment in comments[:10]:
-        print("Comment:\n", comment["comment"])
-        print("Start line:", comment["start_line"])
-        print("End line:", comment["end_line"])
-        print("Filepath:", comment["filepath"])
-        print("Repo owner:", comment["repo_owner"])
-        print("Repo name:", comment["repo_name"])
+    print("Total files found:", len(files))
+
+    for file in files[:10]:
+        print("File:", file["filepath"])
+        print("Content:")
+        console.print(Syntax(file["content"][:1000], "python", theme="monokai"))
+        print("Content without comments:")
+        console.print(Syntax(file["content_without_comments"][:1000], "python", theme="monokai"))
         print("-" * 80)

@@ -1,6 +1,7 @@
 import os
 import requests
 from dotenv import load_dotenv
+import base64
 
 load_dotenv()
 
@@ -49,3 +50,11 @@ def get_commit(repo_owner: str, repo_name: str, commit_sha: str) -> dict:
     response = requests.get(url, headers=_github_api_headers(), timeout=DEFAULT_TIMEOUT)
     response.raise_for_status()
     return response.json()
+
+def get_file_contents(repo_owner: str, repo_name: str, filepath: str, commit_sha: str) -> dict:
+    url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{filepath}?ref={commit_sha}"
+    response = requests.get(url, headers=_github_api_headers(), timeout=DEFAULT_TIMEOUT)
+    response.raise_for_status()
+    data = response.json()
+    data["content"] = base64.b64decode(data["content"]).decode("utf-8") 
+    return data
