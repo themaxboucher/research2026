@@ -2,6 +2,7 @@ import os
 import requests
 from dotenv import load_dotenv
 import base64
+import logging
 
 load_dotenv()
 
@@ -26,7 +27,11 @@ def search_repos(language: str = "Python", min_stars: int = 10_000, pushed_after
     url: str | None = f"https://api.github.com/search/repositories?q={url_query}&{url_sort}&{url_per_page}"
     while url:
         response = requests.get(url, headers=_github_api_headers(), timeout=DEFAULT_TIMEOUT)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            logging.error(f"Error searching repos: {e}")
+            return repos
         data = response.json()
         repos.extend(data.get("items", []))
         url = response.links.get("next", {}).get("url")
@@ -39,7 +44,11 @@ def get_repo_commits(repo_name: str, repo_owner: str, since: str = "2026-01-01")
     url: str | None = f"https://api.github.com/repos/{repo_owner}/{repo_name}/commits?{url_since}&{url_per_page}"
     while url:
         response = requests.get(url, headers=_github_api_headers(), timeout=DEFAULT_TIMEOUT)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            logging.error(f"Error getting repo commits: {e}")
+            return commits
         data = response.json()
         commits.extend(data)
         url = response.links.get("next", {}).get("url")
@@ -48,13 +57,26 @@ def get_repo_commits(repo_name: str, repo_owner: str, since: str = "2026-01-01")
 def get_commit(repo_owner: str, repo_name: str, commit_sha: str) -> dict:
     url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/commits/{commit_sha}"
     response = requests.get(url, headers=_github_api_headers(), timeout=DEFAULT_TIMEOUT)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        logging.error(f"Error getting commit: {e}")
+        return None
     return response.json()
 
 def get_file_contents(repo_owner: str, repo_name: str, filepath: str, commit_sha: str) -> dict:
-    url = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contents/{filepath}?ref={commit_sha}"
-    response = requests.get(url, headers=_github_api_headers(), timeout=DEFAULT_TIMEOUT)
-    response.raise_for_status()
-    data = response.json()
-    data["content"] = base64.b64decode(data["content"]).decode("utf-8") 
+    url = f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{commit_sha}/{filepath}"
+    response = requests.get(url, timeout=DEFAULT_TIMEOUT)
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        logging.error(f"Error getting file contents: {url} {e}")
+        return None
+    data = {
+        "repo_owner": repo_owner,
+        "repo_name": repo_name,
+        "filepath": filepath,
+        "sha": commit_sha,
+        "content": response.text,
+    }
     return data
