@@ -13,9 +13,6 @@ GENERATE_MODEL = "meta-llama/llama-3.1-8b-instruct"
 PROVIDER = { "only": ["nebius/fp8", "groq"], "allow_fallbacks": False} # only use the providers with the max output tokens
 ZERO_SHOT_PROMPT_PATH = Path(__file__).parent / "prompts" / "zero_shot.md"
 
-logging.basicConfig(level=logging.INFO)
-
-
 def _load_zero_shot_prompt(code_file: str) -> str:
     template = ZERO_SHOT_PROMPT_PATH.read_text(encoding="utf-8")
     return template.replace("{code_file}", code_file)

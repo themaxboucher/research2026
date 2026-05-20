@@ -46,6 +46,22 @@ def _tokens_to_try() -> list[str | None]:
     first = _next_token()
     return [first] + [token for token in GITHUB_TOKENS if token != first]
 
+def _log_successful_request(response: requests.Response) -> None:
+    remaining = response.headers.get("X-RateLimit-Remaining")
+    if remaining is not None:
+        logging.info(
+            "GitHub API GET %s -> %s (remaining=%s)",
+            response.url,
+            response.status_code,
+            remaining,
+        )
+    else:
+        logging.info(
+            "GitHub API GET %s -> %s",
+            response.url,
+            response.status_code,
+        )
+
 def _github_get(url: str, **kwargs) -> requests.Response:
     kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
     last_response: requests.Response | None = None
@@ -54,6 +70,8 @@ def _github_get(url: str, **kwargs) -> requests.Response:
         response = requests.get(url, headers=_github_api_headers(token), **kwargs)
         last_response = response
         if not _is_rate_limited(response):
+            if response.ok:
+                _log_successful_request(response)
             return response
         logging.warning("GitHub rate limit hit, trying next token")
 
@@ -69,9 +87,9 @@ def _github_get(url: str, **kwargs) -> requests.Response:
 
     return last_response
 
-def search_repos(language: str = "Python", min_stars: int = 10_000, pushed_after: str = "2026-01-01") -> list[dict]:
+def search_repos(language: str, topic: str, min_stars: int, pushed_after: str) -> list[dict]:
     repos: list[dict] = []
-    url_query = f"is:public+template:false+archived:false+language:{language}+stars:>={min_stars}+pushed:>{pushed_after}"
+    url_query = f"is:public+template:false+archived:false+language:{language}+topic:{topic}+stars:>={min_stars}+pushed:>{pushed_after}"
     url_sort = "sort=stars&order=desc"
     url_per_page = "per_page=100"
     url: str | None = f"https://api.github.com/search/repositories?q={url_query}&{url_sort}&{url_per_page}"
@@ -125,6 +143,7 @@ def get_file_contents(repo_owner: str, repo_name: str, filepath: str, commit_sha
     except requests.exceptions.HTTPError as e:
         logging.error(f"Error getting file contents: {url} {e}")
         return None
+    _log_successful_request(response)
     data = {
         "repo_owner": repo_owner,
         "repo_name": repo_name,

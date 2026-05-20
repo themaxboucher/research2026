@@ -2,17 +2,7 @@ from collect import collect_dataset
 from analyse import analyse_dataset
 from generate import generate_comments_for_dataset
 import argparse
-
-# Knowledge cutoff dates
-# Gemini 3.1 Pro (https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-pro): January 2025
-# GPT-5.5 (https://developers.openai.com/api/docs/models/gpt-5.5): December 1st, 2025
-# Llama-3.1-8b (https://huggingface.co/meta-llama/Llama-3.1-8B): December 2023
-# Qwen...
-
-
-CUTOFF_DATE = "2025-02-01"
-REPO_LIMIT = 20
-COMMIT_LIMIT = 500
+import logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -29,9 +19,14 @@ def parse_args():
     return args 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    
     args = parse_args()
     if args.collect :
-        collect_dataset(CUTOFF_DATE, REPO_LIMIT, COMMIT_LIMIT)
+        collect_dataset()
     if args.analyse:
         analyse_dataset()
     if args.generate:
