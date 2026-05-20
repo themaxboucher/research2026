@@ -1,11 +1,50 @@
 # Research 2026
 
-Research project comparing **how humans write code comments** vs **how LLMs write code comments**, using GitHub commits made after each LLM's knowledge cutoff as the source of human-written ground truth.
+Compare how human developers write Python `#` comments with how LLMs write them on the same source files.
 
-## Research goal
+## Pipeline
 
-1. Collect comments written by humans in high-quality public GitHub repos, **after** the knowledge cutoff of the LLMs we want to evaluate.
-2. Quantify patterns in those comments (density per LOC, length, type, position, etc.).
-3. Strip the comments from the same files, ask different LLMs to re-comment them, and compare the LLM output to the human ground truth.
+The project runs in three stages. Each stage reads the previous data and writes the next under `data/`:
 
-Working with post-cutoff data avoids the risk that an LLM has memorized the file and its comments verbatim from training.
+| Stage | Command flag | Input | Output |
+|-------|--------------|-------|--------|
+| Collect | `--collect` | — | `data/files.json` |
+| Generate | `--generate` | `files.json` | `data/files_generated.json` |
+| Analyse | `--analyse` | `files_generated.json` | `data/files_analysed.json` |
+
+Run stages in that order: **collect → generate → analyse**.
+
+1. **Collect** — Uses the GitHub REST API to fetch newly added `.py` files from high-star public repos after a cutoff date. Parses `#` line comments (not docstrings) and saves stripped source plus comment metadata.
+2. **Generate** — Prompts LLMs to add comments to the stripped files. The goal is to compare multiple models and prompting strategies over time. Right now this stage uses OpenRouter.
+3. **Analyse** — Computes metrics and classifications on human and LLM comments so the two can be compared.
+
+## Quick start
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Create a `.env` file:
+
+```env
+GITHUB_TOKEN=          # or GITHUB_TOKENS=comma,separated,tokens
+OPENROUTER_API_KEY=
+```
+
+Run the full pipeline:
+
+```bash
+python main.py
+```
+
+Or run one stage at a time:
+
+```bash
+python main.py --collect
+python main.py --generate
+python main.py --analyse
+```
+
+With no flags, `main.py` runs all three stages in order.
