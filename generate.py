@@ -34,7 +34,6 @@ def _parse_generated_code(response: str) -> str:
         code = fence_match.group(1).strip("\n") + "\n"
     else:
         code = text if text.endswith("\n") else text + "\n"
-    print(code)
     valid, error = _is_valid_python(code)
     if not valid:
         raise ValueError(f"Generated code is not valid Python: {error}")
