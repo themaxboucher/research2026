@@ -85,7 +85,7 @@ def collect_dataset() -> None:
             {
                 **file,
                 "content_without_comments": strip_comments_from_file(file["content"]),
-                "added_comments": get_comments_from_file(file["filepath"], file["content"]),
+                "comments": get_comments_from_file(file["content"]),
             }
             for file in file_contents
         ]
