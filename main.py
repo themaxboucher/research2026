@@ -25,12 +25,12 @@ def main():
     )
     
     args = parse_args()
-    if args.collect :
+    if args.collect:
         collect_dataset()
-    if args.analyse:
-        analyse_dataset()
     if args.generate:
         generate_comments_for_dataset()
+    if args.analyse:
+        analyse_dataset()
 
 if __name__ == "__main__":
     main()
