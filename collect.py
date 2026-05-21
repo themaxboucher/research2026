@@ -6,8 +6,7 @@ import logging
 
 MAX_WORKERS = 8
 
-REPO_LIMIT = 12
-COMMIT_LIMIT = 1000
+REPO_LIMIT = 50
 
 # Knowledge cutoff dates
 # Gemini 3.1 Pro (https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-pro): January 2025
@@ -18,7 +17,7 @@ COMMIT_LIMIT = 1000
 REPO_LANGUAGE = "Python"
 REPO_TOPIC = "python"
 REPO_MIN_STARS = 10_000
-CUTOFF_DATE = "2026-01-01"
+CUTOFF_DATE = "2025-02-01"
 
 def get_files_from_commit(commit: dict) -> list[dict]:
     return [
@@ -57,7 +56,7 @@ def collect_dataset() -> None:
         logging.info("Getting detailed commits for repositories...")
         detailed_commits: list[dict] = list(executor.map(
             lambda commit: get_commit(commit["repo_owner"], commit["repo_name"], commit["sha"]),
-            commits[:COMMIT_LIMIT],
+            commits,
         ))
 
         logging.info("Total detailed commits fetched: %d", len(detailed_commits))
