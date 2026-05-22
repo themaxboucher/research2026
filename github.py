@@ -87,7 +87,8 @@ def _github_get(url: str, **kwargs) -> requests.Response:
             if reset_raw:
                 wait_buffer_seconds = 1
                 wait_seconds = max(0, int(reset_raw) - int(time.time())) + wait_buffer_seconds
-                logging.info("All tokens rate limited, sleeping %s seconds", wait_seconds)
+                wait_minutes = wait_seconds / 60
+                logging.info("All tokens rate limited, sleeping %s minutes", wait_minutes)
                 time.sleep(wait_seconds)
                 return _github_get(url, **kwargs)
 
