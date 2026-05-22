@@ -73,14 +73,7 @@ def _github_get(url: str, **kwargs) -> requests.Response:
                 response = requests.get(url, headers=_github_api_headers(token), **kwargs)
                 last_response = response
                 if not _is_rate_limited(response):
-                    try:
-                        response.raise_for_status()
-                    except requests.exceptions.HTTPError as e:
-                        status = e.response.status_code if e.response is not None else "unknown"
-                        logging.error("GitHub API GET failed (HTTP %s): %s", status, url)
-                        raise RuntimeError(
-                            f"GitHub API GET failed with HTTP {status}: {url}"
-                        ) from e
+                    response.raise_for_status()
                     _log_successful_request(response)
                     return response
                 logging.warning("GitHub rate limit hit, trying next token")
@@ -103,14 +96,14 @@ def _github_get(url: str, **kwargs) -> requests.Response:
                 f"GitHub API rate limit exhausted for all tokens (HTTP {status}); "
                 f"no X-RateLimit-Reset header to wait on: {url}"
             )
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
             if attempt + 1 >= MAX_RETRIES:
                 raise RuntimeError(
-                    f"GitHub API GET failed after {MAX_RETRIES} connection retries: {url}"
+                    f"GitHub API GET failed after {MAX_RETRIES} retries: {url}"
                 ) from e
             wait = 2**attempt
             logging.warning(
-                "GitHub API connection error (attempt %s/%s), retrying in %ss: %s",
+                "GitHub API error (attempt %s/%s), retrying in %ss: %s",
                 attempt + 1,
                 MAX_RETRIES,
                 wait,
