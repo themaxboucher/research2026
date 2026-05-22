@@ -3,10 +3,11 @@ from comments import get_comments_from_file, strip_comments_from_file
 from storage import save_to_json
 from concurrent.futures import ThreadPoolExecutor
 import logging
+import tokenize
 
 MAX_WORKERS = 8
 
-REPO_LIMIT = 50
+REPO_LIMIT = 10
 
 # Knowledge cutoff dates
 # Gemini 3.1 Pro (https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-pro): January 2025
@@ -17,7 +18,7 @@ REPO_LIMIT = 50
 REPO_LANGUAGE = "Python"
 REPO_TOPIC = "python"
 REPO_MIN_STARS = 10_000
-CUTOFF_DATE = "2025-02-01"
+CUTOFF_DATE = "2026-01-01"
 
 def get_files_from_commit(commit: dict) -> list[dict]:
     return [
@@ -26,6 +27,20 @@ def get_files_from_commit(commit: dict) -> list[dict]:
         if file.get("status") == "added" and 
         file["filename"].endswith(".py")
     ]
+
+def process_file(file: dict) -> dict | None:
+    try:
+        return {
+            **file,
+            "content_without_comments": strip_comments_from_file(file["content"]),
+            "comments": get_comments_from_file(file["content"]),
+        }
+    except (tokenize.TokenError, IndentationError, SyntaxError) as e:
+        logging.warning(
+            "Skipping file %s/%s/%s: tokenization failed (%s)",
+            file.get("repo_owner"), file.get("repo_name"), file.get("filename"), e,
+        )
+        return None
 
 def collect_dataset() -> None:
     logging.info("Searching for repositories...")
@@ -80,16 +95,11 @@ def collect_dataset() -> None:
             commit_files,
         ))
 
-        files: list[dict] = [
-            {
-                **file,
-                "content_without_comments": strip_comments_from_file(file["content"]),
-                "comments": get_comments_from_file(file["content"]),
-            }
-            for file in file_contents
-        ]
+        processed_files: list[dict | None] = [process_file(file) for file in file_contents]
+        files: list[dict] = [file for file in processed_files if file is not None]
 
-        logging.info("Total files found: %d", len(files))
+        skipped = len(processed_files) - len(files)
+        logging.info("Total files found: %d (skipped %d due to tokenization errors)", len(files), skipped)
 
     if files:
         logging.info("Saving data to JSON...")

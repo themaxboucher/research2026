@@ -5,10 +5,7 @@ def get_comments_from_file(file_content: str) -> list[dict]:
     if not file_content:
         return []
 
-    try:
-        tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
-    except (tokenize.TokenError, IndentationError, SyntaxError):
-        return []
+    tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
 
     lines = file_content.splitlines(keepends=True)
     found_comments: list[tuple[int, str, bool]] = []
