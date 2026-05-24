@@ -151,22 +151,7 @@ def get_commit(repo_owner: str, repo_name: str, commit_sha: str) -> dict:
 
 def get_file_contents(repo_owner: str, repo_name: str, filepath: str, commit_sha: str) -> dict:
     url = f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{commit_sha}/{filepath}"
-    response = requests.get(url, timeout=DEFAULT_TIMEOUT)
-    try:
-        response.raise_for_status()
-    except requests.exceptions.HTTPError as e:
-        status = e.response.status_code if e.response is not None else "unknown"
-        path = f"{repo_owner}/{repo_name}@{commit_sha}:{filepath}"
-        logging.error(
-            "Failed to fetch raw file %s (HTTP %s): %s",
-            path,
-            status,
-            url,
-        )
-        raise RuntimeError(
-            f"Failed to fetch raw file {path} (HTTP {status}): {url}"
-        ) from e
-    _log_successful_request(response)
+    response = _github_get(url)
     data = {
         "repo_owner": repo_owner,
         "repo_name": repo_name,
