@@ -1,7 +1,17 @@
-from github import search_repos, get_repo_commits, get_commit, get_file_contents
+from github import (
+    GITHUB_TOKENS,
+    close_rate_limit_bars,
+    get_commit,
+    get_file_contents,
+    get_repo_commits,
+    init_rate_limit_bars,
+    search_repos,
+)
 from comments import get_comments_from_file, strip_comments_from_file
 from storage import save_to_json
 from concurrent.futures import ThreadPoolExecutor
+from tqdm.auto import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 import logging
 import tokenize
 
@@ -47,57 +57,88 @@ def collect_dataset() -> None:
 
     logging.info("Total repositories found: %d", len(repos))
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        logging.info("Getting commits for repositories...")
-        commits_by_repo: list[tuple[dict, list[dict]]] = list(executor.map(
-            lambda repo: (repo, get_repo_commits(repo["name"], repo["owner"]["login"], since=CUTOFF_DATE)),
-            repos,
-        ))
-        
-        commits: list[dict] = [
-            {
-                **commit, 
-                "repo_name": repo["name"], 
-                "repo_owner": repo["owner"]["login"]
-            } 
-            for repo, commits_list in commits_by_repo 
-            for commit in commits_list
-        ]
+    pipeline_position = len(GITHUB_TOKENS)
 
-        logging.info("Total commits found: %d", len(commits))
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor, logging_redirect_tqdm():
+        init_rate_limit_bars()
+        try:
+            commits_by_repo: list[tuple[dict, list[dict]]] = list(tqdm(
+                executor.map(
+                    lambda repo: (repo, get_repo_commits(repo["name"], repo["owner"]["login"], since=CUTOFF_DATE)),
+                    repos,
+                ),
+                total=len(repos),
+                desc="Getting repo commits",
+                unit="repo",
+                position=pipeline_position,
+                leave=True,
+            ))
 
-        logging.info("Getting detailed commits for repositories...")
-        detailed_commits: list[dict] = list(executor.map(
-            lambda commit: get_commit(commit["repo_owner"], commit["repo_name"], commit["sha"]),
-            commits,
-        ))
+            commits: list[dict] = [
+                {
+                    **commit,
+                    "repo_name": repo["name"],
+                    "repo_owner": repo["owner"]["login"]
+                }
+                for repo, commits_list in commits_by_repo
+                for commit in commits_list
+            ]
 
-        logging.info("Total detailed commits fetched: %d", len(detailed_commits))
+            logging.info("Total commits found: %d", len(commits))
 
-        commit_files: list[dict] = [                                                         
-            {                                                                    
-                **file,                                                          
-                "repo_owner": commit["repo_owner"],                              
-                "repo_name": commit["repo_name"],                                
-                "sha": commit["sha"],                                            
-            }                                                                    
-            for commit in detailed_commits                                  
-            for file in get_files_from_commit(commit)                            
-        ]  
+            detailed_commits: list[dict] = list(tqdm(
+                executor.map(
+                    lambda commit: get_commit(commit["repo_owner"], commit["repo_name"], commit["sha"]),
+                    commits,
+                ),
+                total=len(commits),
+                desc="Getting commit details",
+                unit="commit",
+                position=pipeline_position + 1,
+                leave=True,
+            ))
 
-        logging.info("Total commit files found: %d", len(commit_files))
+            commit_files: list[dict] = [
+                {
+                    **file,
+                    "repo_owner": commit["repo_owner"],
+                    "repo_name": commit["repo_name"],
+                    "sha": commit["sha"],
+                }
+                for commit in detailed_commits
+                for file in get_files_from_commit(commit)
+            ]
 
-        logging.info("Getting file contents for commits...")
-        file_contents: list[dict] = list(executor.map(
-            lambda file: get_file_contents(file["repo_owner"], file["repo_name"], file["filename"], file["sha"]),
-            commit_files,
-        ))
+            logging.info("Total commit files found: %d", len(commit_files))
 
-        processed_files: list[dict | None] = [process_file(file) for file in file_contents]
-        files: list[dict] = [file for file in processed_files if file is not None]
+            file_contents: list[dict] = list(tqdm(
+                executor.map(
+                    lambda file: get_file_contents(file["repo_owner"], file["repo_name"], file["filename"], file["sha"]),
+                    commit_files,
+                ),
+                total=len(commit_files),
+                desc="Getting file contents",
+                unit="file",
+                position=pipeline_position + 2,
+                leave=True,
+            ))
 
-        skipped = len(processed_files) - len(files)
-        logging.info("Total files found: %d (skipped %d due to tokenization errors)", len(files), skipped)
+            processed_files: list[dict | None] = [
+                process_file(file)
+                for file in tqdm(
+                    file_contents,
+                    desc="Processing files",
+                    unit="file",
+                    position=pipeline_position + 3,
+                    leave=True,
+                )
+            ]
+            files: list[dict] = [file for file in processed_files if file is not None]
+
+            skipped = len(processed_files) - len(files)
+            logging.info("Total files found: %d (skipped %d due to tokenization errors)", len(files), skipped)
+        finally:
+            close_rate_limit_bars()
 
     if files:
         logging.info("Saving data to JSON...")

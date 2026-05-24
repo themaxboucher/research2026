@@ -3,3 +3,4 @@ requests
 openrouter
 google-genai
 openai
+tqdm

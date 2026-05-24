@@ -6,11 +6,13 @@ import time
 
 import requests
 from dotenv import load_dotenv
+from tqdm.auto import tqdm
 
 load_dotenv()
 
 DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 5
+RATE_LIMIT_DEFAULT_TOTAL = 5000
 
 def _load_github_tokens() -> list[str]:
     raw = os.getenv("GITHUB_TOKENS") or os.getenv("GITHUB_TOKEN") or ""
@@ -19,6 +21,66 @@ def _load_github_tokens() -> list[str]:
 GITHUB_TOKENS = _load_github_tokens()
 _token_cycle = itertools.cycle(GITHUB_TOKENS) if GITHUB_TOKENS else itertools.cycle([None])
 _token_lock = threading.Lock()
+
+_rate_limit_bars: list[tqdm] = []
+_rate_limit_lock = threading.Lock()
+
+def init_rate_limit_bars() -> None:
+    """Create one tqdm progress bar per GitHub token at fixed positions.
+
+    Bars fill up as requests are consumed (full bar = rate limit exhausted).
+    Safe to call multiple times; subsequent calls are no-ops while bars exist.
+    """
+    global _rate_limit_bars
+    if _rate_limit_bars or not GITHUB_TOKENS:
+        return
+    _rate_limit_bars = [
+        tqdm(
+            total=RATE_LIMIT_DEFAULT_TOTAL,
+            desc=f"Token {i + 1} rate limit",
+            position=i,
+            leave=True,
+            bar_format="{desc}: {n}/{total} used |{bar}|{postfix}",
+        )
+        for i in range(len(GITHUB_TOKENS))
+    ]
+
+def close_rate_limit_bars() -> None:
+    global _rate_limit_bars
+    for bar in _rate_limit_bars:
+        bar.close()
+    _rate_limit_bars = []
+
+def _update_rate_limit_bar(token: str | None, response: requests.Response) -> None:
+    if token is None or not _rate_limit_bars:
+        return
+    remaining_raw = response.headers.get("X-RateLimit-Remaining")
+    if remaining_raw is None:
+        return
+    try:
+        idx = GITHUB_TOKENS.index(token)
+    except ValueError:
+        return
+    if idx >= len(_rate_limit_bars):
+        return
+    try:
+        remaining = int(remaining_raw)
+        limit_raw = response.headers.get("X-RateLimit-Limit")
+        limit = int(limit_raw) if limit_raw else _rate_limit_bars[idx].total
+    except ValueError:
+        return
+    reset_raw = response.headers.get("X-RateLimit-Reset")
+    with _rate_limit_lock:
+        bar = _rate_limit_bars[idx]
+        bar.total = limit
+        bar.n = max(0, limit - remaining)
+        if reset_raw:
+            try:
+                reset_in = max(0, int(reset_raw) - int(time.time()))
+                bar.set_postfix_str(f"resets in {reset_in // 60}m{reset_in % 60:02d}s", refresh=False)
+            except ValueError:
+                pass
+        bar.refresh()
 
 def _next_token() -> str | None:
     with _token_lock:
@@ -47,22 +109,6 @@ def _tokens_to_try() -> list[str | None]:
     first = _next_token()
     return [first] + [token for token in GITHUB_TOKENS if token != first]
 
-def _log_successful_request(response: requests.Response) -> None:
-    remaining = response.headers.get("X-RateLimit-Remaining")
-    if remaining is not None:
-        logging.info(
-            "GitHub API GET %s -> %s (remaining=%s)",
-            response.url,
-            response.status_code,
-            remaining,
-        )
-    else:
-        logging.info(
-            "GitHub API GET %s -> %s",
-            response.url,
-            response.status_code,
-        )
-
 def _github_get(url: str, **kwargs) -> requests.Response:
     kwargs.setdefault("timeout", DEFAULT_TIMEOUT)
     last_response: requests.Response | None = None
@@ -74,8 +120,9 @@ def _github_get(url: str, **kwargs) -> requests.Response:
                 last_response = response
                 if not _is_rate_limited(response):
                     response.raise_for_status()
-                    _log_successful_request(response)
+                    _update_rate_limit_bar(token, response)
                     return response
+                _update_rate_limit_bar(token, response)
                 logging.warning("GitHub rate limit hit, trying next token")
 
             if last_response is None:
