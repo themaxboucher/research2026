@@ -7,8 +7,6 @@ import tokenize
 
 MAX_WORKERS = 8
 
-REPO_LIMIT = 10
-
 # Knowledge cutoff dates
 # Gemini 3.1 Pro (https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-pro): January 2025
 # GPT-5.5 (https://developers.openai.com/api/docs/models/gpt-5.5): December 1st, 2025
@@ -18,7 +16,7 @@ REPO_LIMIT = 10
 REPO_LANGUAGE = "Python"
 REPO_TOPIC = "python"
 REPO_MIN_STARS = 10_000
-CUTOFF_DATE = "2026-01-01"
+CUTOFF_DATE = "2025-02-01"
 
 def get_files_from_commit(commit: dict) -> list[dict]:
     return [
@@ -53,7 +51,7 @@ def collect_dataset() -> None:
         logging.info("Getting commits for repositories...")
         commits_by_repo: list[tuple[dict, list[dict]]] = list(executor.map(
             lambda repo: (repo, get_repo_commits(repo["name"], repo["owner"]["login"], since=CUTOFF_DATE)),
-            repos[:REPO_LIMIT],
+            repos,
         ))
         
         commits: list[dict] = [
