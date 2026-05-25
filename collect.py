@@ -8,7 +8,7 @@ from github import (
     search_repos,
 )
 from comments import get_comments_from_file, strip_comments_from_file
-from storage import save_to_json
+from storage import load_from_json, save_to_json
 from concurrent.futures import ThreadPoolExecutor
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -28,6 +28,8 @@ REPO_TOPIC = "python"
 REPO_MIN_STARS = 10_000
 CUTOFF_DATE = "2025-02-01"
 
+SAVE_EVERY = 100
+
 def get_files_from_commit(commit: dict) -> list[dict]:
     return [
         file 
@@ -46,57 +48,98 @@ def process_file(file: dict) -> dict | None:
     except (tokenize.TokenError, IndentationError, SyntaxError) as e:
         logging.warning(
             "Skipping file %s/%s/%s: tokenization failed (%s)",
-            file.get("repo_owner"), file.get("repo_name"), file.get("filename"), e,
+            file.get("repo_owner"), file.get("repo_name"), file.get("filepath"), e,
         )
         return None
 
+def load_or_empty(filename: str) -> list[dict]:
+    """Load a JSON file or return an empty list if the file does not exist."""
+    try:
+        return load_from_json(filename)
+    except FileNotFoundError:
+        return []
+
 def collect_dataset() -> None:
-    logging.info("Searching for repositories...")
+    repos: list[dict] = load_or_empty("repos")
+    commits: list[dict] = load_or_empty("commits")
+    detailed_commits: list[dict] = load_or_empty("detailed_commits")
+    file_contents: list[dict] = load_or_empty("file_contents")
 
-    repos = search_repos(language=REPO_LANGUAGE, topic=REPO_TOPIC, min_stars=REPO_MIN_STARS, pushed_after=CUTOFF_DATE)
+    if len(repos) == 0:
+        logging.info("Searching for repositories...")
+        repos = search_repos(language=REPO_LANGUAGE, topic=REPO_TOPIC, min_stars=REPO_MIN_STARS, pushed_after=CUTOFF_DATE)
+        save_to_json(repos, "repos")
 
-    logging.info("Total repositories found: %d", len(repos))
+    logging.info("Total repositories: %d", len(repos))
 
     pipeline_position = len(GITHUB_TOKENS)
+
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor, logging_redirect_tqdm():
         init_rate_limit_bars()
         try:
-            commits_by_repo: list[tuple[dict, list[dict]]] = list(tqdm(
+
+            repos_with_commits_keys: set[tuple[str, str]] = {
+                (commit["repo_owner"], commit["repo_name"]) for commit in commits
+            }
+
+            repos_to_fetch_commits: list[dict] = [
+                repo 
+                for repo in repos 
+                if (repo["owner"]["login"], repo["name"]) not in repos_with_commits_keys
+            ]
+
+            for index, repo_commits in enumerate(tqdm(
                 executor.map(
                     lambda repo: (repo, get_repo_commits(repo["name"], repo["owner"]["login"], since=CUTOFF_DATE)),
-                    repos,
+                    repos_to_fetch_commits,
                 ),
-                total=len(repos),
+                total=len(repos_to_fetch_commits),
                 desc="Getting repo commits",
                 unit="repo",
                 position=pipeline_position,
                 leave=True,
-            ))
+            )):
+                repo, commits_list = repo_commits
+                commits_to_add: list[dict] = [
+                    {
+                        **commit,
+                        "repo_name": repo["name"],
+                        "repo_owner": repo["owner"]["login"]
+                    }
+                    for commit in commits_list
+                ]
+                commits.extend(commits_to_add)
+           
+                if index % SAVE_EVERY == 0:
+                    save_to_json(commits_to_add, "commits")
 
-            commits: list[dict] = [
-                {
-                    **commit,
-                    "repo_name": repo["name"],
-                    "repo_owner": repo["owner"]["login"]
-                }
-                for repo, commits_list in commits_by_repo
-                for commit in commits_list
+            logging.info("Total commits: %d", len(commits))
+
+            existing_detailed_commit_keys: set[tuple[str, str, str]] = {
+                (commit["repo_owner"], commit["repo_name"], commit["sha"]) for commit in detailed_commits
+            }
+
+            detailed_commits_to_fetch: list[dict] = [
+                commit 
+                for commit in commits 
+                if (commit["repo_owner"], commit["repo_name"], commit["sha"]) not in existing_detailed_commit_keys
             ]
 
-            logging.info("Total commits found: %d", len(commits))
-
-            detailed_commits: list[dict] = list(tqdm(
+            for index, detailed_commit in enumerate(tqdm(
                 executor.map(
                     lambda commit: get_commit(commit["repo_owner"], commit["repo_name"], commit["sha"]),
-                    commits,
+                    detailed_commits_to_fetch,
                 ),
-                total=len(commits),
+                total=len(detailed_commits_to_fetch),
                 desc="Getting commit details",
                 unit="commit",
                 position=pipeline_position + 1,
                 leave=True,
-            ))
+            )):
+                detailed_commits.append(detailed_commit)
+                if index % SAVE_EVERY == 0:
+                    save_to_json(detailed_commits, "detailed_commits")
 
             commit_files: list[dict] = [
                 {
@@ -109,19 +152,32 @@ def collect_dataset() -> None:
                 for file in get_files_from_commit(commit)
             ]
 
-            logging.info("Total commit files found: %d", len(commit_files))
+            logging.info("Total commit files: %d", len(commit_files))
 
-            file_contents: list[dict] = list(tqdm(
+            existing_file_keys: set[tuple[str, str, str, str]] = {
+                (file["repo_owner"], file["repo_name"], file["filepath"], file["sha"]) for file in file_contents
+            }
+
+            commit_files_to_fetch: list[dict] = [
+                file 
+                for file in commit_files 
+                if (file["repo_owner"], file["repo_name"], file["filename"], file["sha"]) not in existing_file_keys
+            ]
+
+            for index, file_content in enumerate(tqdm(
                 executor.map(
                     lambda file: get_file_contents(file["repo_owner"], file["repo_name"], file["filename"], file["sha"]),
-                    commit_files,
+                    commit_files_to_fetch,
                 ),
-                total=len(commit_files),
+                total=len(commit_files_to_fetch),
                 desc="Getting file contents",
                 unit="file",
                 position=pipeline_position + 2,
                 leave=True,
-            ))
+            )):
+                file_contents.append(file_content)
+                if index % SAVE_EVERY == 0:
+                    save_to_json(file_contents, "file_contents")
 
             processed_files: list[dict | None] = [
                 process_file(file)
