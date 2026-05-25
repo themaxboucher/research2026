@@ -24,14 +24,25 @@ _token_lock = threading.Lock()
 
 _rate_limit_bars: list[tqdm] = []
 _rate_limit_lock = threading.Lock()
+_reset_timestamps: dict[int, int] = {}
+_ticker_thread: threading.Thread | None = None
+_ticker_stop = threading.Event()
+
+def _ticker_loop() -> None:
+    while not _ticker_stop.wait(timeout=1.0):
+        with _rate_limit_lock:
+            for idx, bar in enumerate(_rate_limit_bars):
+                ts = _reset_timestamps.get(idx)
+                if ts is not None:
+                    reset_in = max(0, ts - int(time.time()))
+                    bar.set_postfix_str(
+                        f"resets in {reset_in // 60}m{reset_in % 60:02d}s",
+                        refresh=False,
+                    )
+                    bar.refresh()
 
 def init_rate_limit_bars() -> None:
-    """Create one tqdm progress bar per GitHub token at fixed positions.
-
-    Bars fill up as requests are consumed (full bar = rate limit exhausted).
-    Safe to call multiple times; subsequent calls are no-ops while bars exist.
-    """
-    global _rate_limit_bars
+    global _rate_limit_bars, _ticker_thread
     if _rate_limit_bars or not GITHUB_TOKENS:
         return
     _rate_limit_bars = [
@@ -44,12 +55,20 @@ def init_rate_limit_bars() -> None:
         )
         for i in range(len(GITHUB_TOKENS))
     ]
+    _ticker_stop.clear()
+    _ticker_thread = threading.Thread(target=_ticker_loop, daemon=True)
+    _ticker_thread.start()
 
 def close_rate_limit_bars() -> None:
-    global _rate_limit_bars
+    global _rate_limit_bars, _ticker_thread
+    _ticker_stop.set()
+    if _ticker_thread is not None:
+        _ticker_thread.join(timeout=2)
+        _ticker_thread = None
     for bar in _rate_limit_bars:
         bar.close()
     _rate_limit_bars = []
+    _reset_timestamps.clear()
 
 def _update_rate_limit_bar(token: str | None, response: requests.Response) -> None:
     if token is None or not _rate_limit_bars:
@@ -76,8 +95,7 @@ def _update_rate_limit_bar(token: str | None, response: requests.Response) -> No
         bar.n = max(0, limit - remaining)
         if reset_raw:
             try:
-                reset_in = max(0, int(reset_raw) - int(time.time()))
-                bar.set_postfix_str(f"resets in {reset_in // 60}m{reset_in % 60:02d}s", refresh=False)
+                _reset_timestamps[idx] = int(reset_raw)
             except ValueError:
                 pass
         bar.refresh()
@@ -123,7 +141,6 @@ def _github_get(url: str, **kwargs) -> requests.Response:
                     _update_rate_limit_bar(token, response)
                     return response
                 _update_rate_limit_bar(token, response)
-                logging.warning("GitHub rate limit hit, trying next token")
 
             if last_response is None:
                 raise RuntimeError(
@@ -134,8 +151,6 @@ def _github_get(url: str, **kwargs) -> requests.Response:
             if reset_raw:
                 wait_buffer_seconds = 1
                 wait_seconds = max(0, int(reset_raw) - int(time.time())) + wait_buffer_seconds
-                wait_minutes = wait_seconds / 60
-                logging.info("All tokens rate limited, sleeping %s minutes", wait_minutes)
                 time.sleep(wait_seconds)
                 return _github_get(url, **kwargs)
 
