@@ -24,25 +24,12 @@ _token_lock = threading.Lock()
 
 _rate_limit_bars: list[tqdm] = []
 _rate_limit_lock = threading.Lock()
-_reset_timestamps: dict[int, int] = {}
-_ticker_thread: threading.Thread | None = None
-_ticker_stop = threading.Event()
 
-def _ticker_loop() -> None:
-    while not _ticker_stop.wait(timeout=1.0):
-        with _rate_limit_lock:
-            for idx, bar in enumerate(_rate_limit_bars):
-                ts = _reset_timestamps.get(idx)
-                if ts is not None:
-                    reset_in = max(0, ts - int(time.time()))
-                    bar.set_postfix_str(
-                        f"resets in {reset_in // 60}m{reset_in % 60:02d}s",
-                        refresh=False,
-                    )
-                    bar.refresh()
+def _format_reset_time(reset_timestamp: int) -> str:
+    return time.strftime("%H:%M:%S", time.localtime(reset_timestamp))
 
 def init_rate_limit_bars() -> None:
-    global _rate_limit_bars, _ticker_thread
+    global _rate_limit_bars
     if _rate_limit_bars or not GITHUB_TOKENS:
         return
     _rate_limit_bars = [
@@ -55,20 +42,12 @@ def init_rate_limit_bars() -> None:
         )
         for i in range(len(GITHUB_TOKENS))
     ]
-    _ticker_stop.clear()
-    _ticker_thread = threading.Thread(target=_ticker_loop, daemon=True)
-    _ticker_thread.start()
 
 def close_rate_limit_bars() -> None:
-    global _rate_limit_bars, _ticker_thread
-    _ticker_stop.set()
-    if _ticker_thread is not None:
-        _ticker_thread.join(timeout=2)
-        _ticker_thread = None
+    global _rate_limit_bars
     for bar in _rate_limit_bars:
         bar.close()
     _rate_limit_bars = []
-    _reset_timestamps.clear()
 
 def _update_rate_limit_bar(token: str | None, response: requests.Response) -> None:
     if token is None or not _rate_limit_bars:
@@ -95,7 +74,10 @@ def _update_rate_limit_bar(token: str | None, response: requests.Response) -> No
         bar.n = max(0, limit - remaining)
         if reset_raw:
             try:
-                _reset_timestamps[idx] = int(reset_raw)
+                bar.set_postfix_str(
+                    f"resets at {_format_reset_time(int(reset_raw))}",
+                    refresh=False,
+                )
             except ValueError:
                 pass
         bar.refresh()
