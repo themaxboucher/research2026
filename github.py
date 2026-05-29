@@ -3,6 +3,8 @@ import logging
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
 
 import requests
 from dotenv import load_dotenv
@@ -12,7 +14,12 @@ load_dotenv()
 
 DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 5
-RATE_LIMIT_DEFAULT_TOTAL = 5000
+GITHUB_RATE_LIMIT_PER_HOUR = 5000 # GitHub REST API has a rate limit of 5000 requests per hour for authenticated users (https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2026-03-10)
+GITHUB_SEARCH_RATE_LIMIT_PER_MINUTE = 30 # GitHub REST API limit search queries to 30 requests per minute for authenticated users (https://docs.github.com/en/rest/search/search?apiVersion=2026-03-10#about-search)
+GITHUB_SEARCH_RESULT_LIMIT = 1000 # GitHub REST API limit search queries to 1000 results (https://docs.github.com/en/rest/search/search?apiVersion=2026-03-10#search-repositories)
+SEARCH_MAX_WORKERS = 8
+
+SearchPartition = tuple[int, int, str, str]
 
 def _load_github_tokens() -> list[str]:
     raw = os.getenv("GITHUB_TOKENS") or os.getenv("GITHUB_TOKEN") or ""
@@ -34,7 +41,7 @@ def init_rate_limit_bars() -> None:
         return
     _rate_limit_bars = [
         tqdm(
-            total=RATE_LIMIT_DEFAULT_TOTAL,
+            total=GITHUB_RATE_LIMIT_PER_HOUR,
             desc=f"Token {i + 1} rate limit",
             position=i,
             leave=True,
@@ -160,18 +167,127 @@ def _github_get(url: str, **kwargs) -> requests.Response:
         f"GitHub API GET failed after {MAX_RETRIES} connection retries: {url}"
     )
 
-def search_repos(language: str, topic: str, min_stars: int, pushed_after: str) -> list[dict]:
+def _build_search_query(language: str, min_stars: int, max_stars: int | None, min_pushed_date: str, max_pushed_date: str | None = None) -> str:
+    stars_qualifier = f"stars:{min_stars}..{max_stars}" if max_stars is not None else f"stars:>={min_stars}"
+    pushed_qualifier = f"pushed:{min_pushed_date}..{max_pushed_date}" if max_pushed_date is not None else f"pushed:>{min_pushed_date}"
+    return f"is:public+template:false+archived:false+language:{language}+{stars_qualifier}+{pushed_qualifier}"
+
+def _count_repos_in_partition(language: str, partition: SearchPartition) -> int:
+    min_stars, max_stars, min_pushed_date, max_pushed_date = partition
+    query = _build_search_query(language, min_stars, max_stars, min_pushed_date, max_pushed_date)
+    url = f"https://api.github.com/search/repositories?q={query}&per_page=1"
+    response = _github_get(url)
+    return response.json().get("total_count", 0)
+
+def _get_highest_star_count(language: str, min_stars: int, pushed_after: str) -> int:
+    query = _build_search_query(language, min_stars, None, pushed_after)
+    url = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=1"
+    response = _github_get(url)
+    items = response.json().get("items", [])
+    if not items:
+        return min_stars
+    return items[0]["stargazers_count"]
+
+def _parse_search_date(search_date: str) -> date:
+    return datetime.strptime(search_date, "%Y-%m-%d").date()
+
+def _format_search_date(search_date: date) -> str:
+    return search_date.isoformat()
+
+def _get_first_partition_pushed_date(pushed_after: str) -> str:
+    first_partition_pushed_date = _parse_search_date(pushed_after) + timedelta(days=1)
+    return _format_search_date(first_partition_pushed_date)
+
+def _split_star_partition(partition: SearchPartition) -> list[SearchPartition]:
+    min_stars, max_stars, min_pushed_date, max_pushed_date = partition
+    midpoint_stars = (min_stars + max_stars) // 2
+    return [
+        (min_stars, midpoint_stars, min_pushed_date, max_pushed_date),
+        (midpoint_stars + 1, max_stars, min_pushed_date, max_pushed_date),
+    ]
+
+def _split_pushed_partition(partition: SearchPartition) -> list[SearchPartition]:
+    min_stars, max_stars, min_pushed_date, max_pushed_date = partition
+    min_pushed = _parse_search_date(min_pushed_date)
+    max_pushed = _parse_search_date(max_pushed_date)
+    midpoint_pushed = min_pushed + (max_pushed - min_pushed) // 2
+    next_pushed = midpoint_pushed + timedelta(days=1)
+    return [
+        (min_stars, max_stars, _format_search_date(min_pushed), _format_search_date(midpoint_pushed)),
+        (min_stars, max_stars, _format_search_date(next_pushed), _format_search_date(max_pushed)),
+    ]
+
+def _partition_repo_searches(language: str, min_stars: int, pushed_after: str) -> list[SearchPartition]:
+    highest_star_count = _get_highest_star_count(language, min_stars, pushed_after)
+    min_pushed_date = _get_first_partition_pushed_date(pushed_after)
+    max_pushed_date = _format_search_date(date.today())
+    safe_partitions: list[SearchPartition] = []
+    partitions_to_check: list[SearchPartition] = [(min_stars, highest_star_count, min_pushed_date, max_pushed_date)]
+    while partitions_to_check:
+        partition = partitions_to_check.pop()
+        min_partition_stars, max_partition_stars, min_partition_pushed_date, max_partition_pushed_date = partition
+        count = _count_repos_in_partition(language, partition)
+        if count <= GITHUB_SEARCH_RESULT_LIMIT:
+            safe_partitions.append(partition)
+            continue
+        if min_partition_stars < max_partition_stars:
+            partitions_to_check.extend(_split_star_partition(partition))
+            continue
+        if _parse_search_date(min_partition_pushed_date) < _parse_search_date(max_partition_pushed_date):
+            partitions_to_check.extend(_split_pushed_partition(partition))
+            continue
+        if count > GITHUB_SEARCH_RESULT_LIMIT:
+            logging.warning(
+                "Star count %d and pushed date %s has %d repos, exceeding the search limit of %d; some repos will be missed",
+                min_partition_stars, min_partition_pushed_date, count, GITHUB_SEARCH_RESULT_LIMIT,
+            )
+        safe_partitions.append(partition)
+    return safe_partitions
+
+def _search_repos_in_partition(language: str, partition: SearchPartition) -> list[dict]:
     repos: list[dict] = []
-    url_query = f"is:public+template:false+archived:false+language:{language}+topic:{topic}+stars:>={min_stars}+pushed:>{pushed_after}"
-    url_sort = "sort=stars&order=desc"
-    url_per_page = "per_page=100"
-    url: str | None = f"https://api.github.com/search/repositories?q={url_query}&{url_sort}&{url_per_page}"
+    min_stars, max_stars, min_pushed_date, max_pushed_date = partition
+    query = _build_search_query(language, min_stars, max_stars, min_pushed_date, max_pushed_date)
+    url: str | None = f"https://api.github.com/search/repositories?q={query}&sort=stars&order=desc&per_page=100"
     while url:
         response = _github_get(url)
-        data = response.json()
-        repos.extend(data.get("items", []))
+        repos.extend(response.json().get("items", []))
         url = response.links.get("next", {}).get("url")
     return repos
+
+def _deduplicate_repos(repos: list[dict]) -> list[dict]:
+    repos_by_id = {repo["id"]: repo for repo in repos}
+    return list(repos_by_id.values())
+
+def search_repos(language: str, min_stars: int, pushed_after: str) -> list[dict]:
+    search_partitions = _partition_repo_searches(language, min_stars, pushed_after)
+    repos: list[dict] = []
+
+    with ThreadPoolExecutor(max_workers=SEARCH_MAX_WORKERS) as executor:
+        repo_lists = list(tqdm(
+            executor.map(
+                lambda partition: _search_repos_in_partition(language, partition),
+                search_partitions,
+            ),
+            total=len(search_partitions),
+            desc="Searching repos",
+            unit="partition",
+        ))
+
+    for repo_list in repo_lists:
+        repos.extend(repo_list)
+    return _deduplicate_repos(repos)
+
+def get_repo_contributors(repo_name: str, repo_owner: str) -> list[dict]:
+    contributors: list[dict] = []
+    url_per_page = "per_page=100"
+    url: str | None = f"https://api.github.com/repos/{repo_owner}/{repo_name}/contributors?{url_per_page}"
+    while url:
+        response = _github_get(url)
+        data = response.json() if response.content else []
+        contributors.extend(data)
+        url = response.links.get("next", {}).get("url")
+    return contributors
 
 def get_repo_commits(repo_name: str, repo_owner: str, since: str = "2026-01-01") -> list[dict]:
     commits: list[dict] = []

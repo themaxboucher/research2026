@@ -4,6 +4,7 @@ from github import (
     get_commit,
     get_file_contents,
     get_repo_commits,
+    get_repo_contributors,
     init_rate_limit_bars,
     search_repos,
 )
@@ -24,8 +25,8 @@ MAX_WORKERS = 8
 # Qwen...
 
 REPO_LANGUAGE = "Python"
-REPO_TOPIC = "python"
-REPO_MIN_STARS = 10_000
+REPO_MIN_STARS = 20
+REPO_MIN_CONTRIBUTORS = 5
 CUTOFF_DATE = "2025-02-01"
 
 SAVE_EVERY = 100
@@ -52,6 +53,16 @@ def process_file(file: dict) -> dict | None:
         )
         return None
 
+def add_contributor_count_to_repo(repo: dict) -> dict:
+    if "contributors_count" in repo:
+        return repo
+
+    contributors = get_repo_contributors(repo["name"], repo["owner"]["login"])
+    return {
+        **repo,
+        "contributors_count": len(contributors),
+    }
+
 def load_or_empty(filename: str) -> list[dict]:
     """Load a JSON file or return an empty list if the file does not exist."""
     try:
@@ -67,10 +78,7 @@ def collect_dataset() -> None:
 
     if len(repos) == 0:
         logging.info("Searching for repositories...")
-        repos = search_repos(language=REPO_LANGUAGE, topic=REPO_TOPIC, min_stars=REPO_MIN_STARS, pushed_after=CUTOFF_DATE)
-        save_to_json(repos, "repos")
-
-    logging.info("Total repositories: %d", len(repos))
+        repos = search_repos(language=REPO_LANGUAGE, min_stars=REPO_MIN_STARS, pushed_after=CUTOFF_DATE)
 
     pipeline_position = len(GITHUB_TOKENS)
 
@@ -78,6 +86,23 @@ def collect_dataset() -> None:
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor, logging_redirect_tqdm():
         init_rate_limit_bars()
         try:
+            repos_with_contributor_counts: list[dict] = list(tqdm(
+                executor.map(add_contributor_count_to_repo, repos),
+                total=len(repos),
+                desc="Getting repo contributors",
+                unit="repo",
+                position=pipeline_position,
+                leave=True,
+            ))
+
+            repos = [
+                repo
+                for repo in repos_with_contributor_counts
+                if repo["contributors_count"] >= REPO_MIN_CONTRIBUTORS
+            ]
+            save_to_json(repos, "repos")
+
+            logging.info("Total repositories: %d", len(repos))
 
             repos_with_commits_keys: set[tuple[str, str]] = {
                 (commit["repo_owner"], commit["repo_name"]) for commit in commits
@@ -97,7 +122,7 @@ def collect_dataset() -> None:
                 total=len(repos_to_fetch_commits),
                 desc="Getting repo commits",
                 unit="repo",
-                position=pipeline_position,
+                position=pipeline_position + 1,
                 leave=True,
             )):
                 repo, commits_list = repo_commits
@@ -134,7 +159,7 @@ def collect_dataset() -> None:
                 total=len(detailed_commits_to_fetch),
                 desc="Getting commit details",
                 unit="commit",
-                position=pipeline_position + 1,
+                position=pipeline_position + 2,
                 leave=True,
             )):
                 detailed_commits.append(detailed_commit)
@@ -172,7 +197,7 @@ def collect_dataset() -> None:
                 total=len(commit_files_to_fetch),
                 desc="Getting file contents",
                 unit="file",
-                position=pipeline_position + 2,
+                position=pipeline_position + 3,
                 leave=True,
             )):
                 file_contents.append(file_content)
@@ -185,7 +210,7 @@ def collect_dataset() -> None:
                     file_contents,
                     desc="Processing files",
                     unit="file",
-                    position=pipeline_position + 3,
+                    position=pipeline_position + 4,
                     leave=True,
                 )
             ]
