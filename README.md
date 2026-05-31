@@ -17,34 +17,3 @@ Run stages in that order: **collect → generate → analyse**.
 1. **Collect** — Uses the GitHub REST API to fetch newly added `.py` files from high-star public repos after a cutoff date. Parses `#` line comments (not docstrings) and saves stripped source plus comment metadata.
 2. **Generate** — Prompts LLMs to add comments to the stripped files. The goal is to compare multiple models and prompting strategies over time. Right now this stage uses OpenRouter.
 3. **Analyse** — Computes metrics and classifications on human and LLM comments so the two can be compared.
-
-## Quick start
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Create a `.env` file:
-
-```env
-GITHUB_TOKEN=          # or GITHUB_TOKENS=comma,separated,tokens
-OPENROUTER_API_KEY=
-```
-
-Run the full pipeline:
-
-```bash
-python main.py
-```
-
-Or run one stage at a time:
-
-```bash
-python main.py --collect
-python main.py --generate
-python main.py --analyse
-```
-
-With no flags, `main.py` runs all three stages in order.
