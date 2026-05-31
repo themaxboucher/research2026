@@ -9,10 +9,14 @@ from comments import get_comments_from_file
 
 GENERATED_DATASET_FILENAME = "files_generated"
 GENERATE_MODEL = "meta-llama/llama-3.1-8b-instruct"
-PROVIDER = { "only": ["nebius/fp8", "groq"], "allow_fallbacks": False} # only use the providers with the max output tokens
+PROVIDER = {
+    "only": ["nebius/fp8", "groq"],
+    "allow_fallbacks": False,
+}  # only use the providers with the max output tokens
 ZERO_SHOT_PROMPT_PATH = Path(__file__).parent / "prompts" / "zero_shot.md"
 
 FILE_GENERATION_LIMIT = 10
+
 
 def _load_zero_shot_prompt(code_file: str) -> str:
     template = ZERO_SHOT_PROMPT_PATH.read_text(encoding="utf-8")
@@ -40,13 +44,16 @@ def _parse_generated_code(response: str) -> str:
 
     return code
 
+
 def generate_comments(file: dict) -> None:
     prompt = _load_zero_shot_prompt(file["content_without_comments"])
     response = get_completion(GENERATE_MODEL, prompt, PROVIDER)
     generated_content = _parse_generated_code(response)
 
     file["generated_content"] = generated_content
-    file["generated_comments"] = [comment for comment in get_comments_from_file(generated_content)]
+    file["generated_comments"] = [
+        comment for comment in get_comments_from_file(generated_content)
+    ]
     file["generation"] = {
         "model": GENERATE_MODEL,
         "prompt": ZERO_SHOT_PROMPT_PATH.name,
@@ -83,6 +90,7 @@ def generate_comments_for_dataset() -> None:
         succeeded,
         skipped,
     )
+
 
 if __name__ == "__main__":
     generate_comments_for_dataset()

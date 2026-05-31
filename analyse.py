@@ -16,31 +16,47 @@ CODE_CONTEXT_LINES = 10
 
 FILE_ANALYSIS_LIMIT = 5
 
+
 def count_loc(file_content: str) -> int:
     return len(file_content.splitlines())
+
 
 def count_comments(file_content: str) -> int:
     tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
     return len([tok for tok in tokens if tok.type == tokenize.COMMENT])
 
+
 def avg_comment_character_length(file_content: str) -> float:
     tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
     if len([tok for tok in tokens if tok.type == tokenize.COMMENT]) == 0:
         return 0
-    return sum([len(tok.string.rstrip("\r\n")) for tok in tokens if tok.type == tokenize.COMMENT]) / len([tok for tok in tokens if tok.type == tokenize.COMMENT])
+    return sum(
+        [
+            len(tok.string.rstrip("\r\n"))
+            for tok in tokens
+            if tok.type == tokenize.COMMENT
+        ]
+    ) / len([tok for tok in tokens if tok.type == tokenize.COMMENT])
 
-def get_code_context(file_content: str, start_line: int, end_line: int, context_lines: int = CODE_CONTEXT_LINES) -> str:
+
+def get_code_context(
+    file_content: str,
+    start_line: int,
+    end_line: int,
+    context_lines: int = CODE_CONTEXT_LINES,
+) -> str:
     lines = file_content.splitlines()
     context_start = max(0, start_line - 1 - context_lines)
     context_end = min(len(lines), end_line + context_lines)
     return "\n".join(lines[context_start:context_end])
 
+
 def _load_classify_prompt(comment_text: str, code_context: str) -> str:
     template = CLASSIFY_COMMENT_PROMPT_PATH.read_text(encoding="utf-8")
-    return (
-        template.replace("{comment_text}", comment_text)
-        .replace("{code_context}", code_context)
+    return template.replace("{comment_text}", comment_text).replace(
+        "{code_context}", code_context
     )
+
 
 def _parse_classification_response(response: str) -> dict:
     text = response.strip()
@@ -52,11 +68,15 @@ def _parse_classification_response(response: str) -> dict:
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid classification JSON: {e}") from e
 
+
 def classify_comment(comment: dict, file_content: str) -> dict:
-    code_context = get_code_context(file_content, comment["start_line"], comment["end_line"])
+    code_context = get_code_context(
+        file_content, comment["start_line"], comment["end_line"]
+    )
     prompt = _load_classify_prompt(comment["comment"], code_context)
     response = get_completion(CLASSIFY_COMMENT_MODEL, prompt)
     return _parse_classification_response(response)
+
 
 def analyse_file_content(file_content: str) -> dict:
     loc = count_loc(file_content)
@@ -71,6 +91,7 @@ def analyse_file_content(file_content: str) -> dict:
         "avg_comment_length": avg_comment_length,
     }
 
+
 def _enrich_comment(comment: dict, file_content: str) -> None:
     classification = classify_comment(comment, file_content)
     comment["classification"] = {
@@ -78,6 +99,7 @@ def _enrich_comment(comment: dict, file_content: str) -> None:
         "model": CLASSIFY_COMMENT_MODEL,
         "prompt": CLASSIFY_COMMENT_PROMPT_PATH.name,
     }
+
 
 def analyse_file_record(file: dict) -> None:
     if file.get("content"):
@@ -89,10 +111,11 @@ def analyse_file_record(file: dict) -> None:
     if file.get("comments"):
         for comment in file["comments"]:
             _enrich_comment(comment, file["content"])
-            
+
     if file.get("generated_comments"):
         for comment in file["generated_comments"]:
             _enrich_comment(comment, file["generated_content"])
+
 
 def analyse_dataset() -> None:
     dataset = load_from_json("files_generated")
@@ -124,6 +147,7 @@ def analyse_dataset() -> None:
         succeeded,
         skipped,
     )
+
 
 if __name__ == "__main__":
     analyse_dataset()
