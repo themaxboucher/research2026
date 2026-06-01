@@ -11,8 +11,6 @@ GENERATED_DATASET_FILENAME = "files_generated"
 GENERATE_MODEL = "HuggingFaceTB/SmolLM2-360M-Instruct"
 ZERO_SHOT_PROMPT_PATH = Path(__file__).parent / "prompts" / "zero_shot.md"
 
-FILE_GENERATION_LIMIT = 1
-
 
 def _load_zero_shot_prompt(source_code: str) -> str:
     template = ZERO_SHOT_PROMPT_PATH.read_text(encoding="utf-8")
@@ -50,9 +48,9 @@ def generate_comments(source_file: dict) -> None:
     }
 
 
-def generate_comments_for_dataset() -> None:
+def generate_comments_for_dataset(limit: int | None = None) -> None:
     all_files = load_from_json("files")
-    files_to_process = all_files[:FILE_GENERATION_LIMIT]
+    files_to_process = all_files[:limit]
     total_files = len(files_to_process)
     logging.info("Generating comments for %d files...", total_files)
 

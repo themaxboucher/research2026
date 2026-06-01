@@ -77,7 +77,12 @@ def load_or_empty(filename: str) -> list[dict]:
         return []
 
 
-def collect_dataset() -> None:
+def collect_dataset(
+    max_repos: int | None = None,
+    max_commits_per_repo: int | None = None,
+    max_commits: int | None = None,
+    max_files: int | None = None,
+) -> None:
     repos: list[dict] = load_or_empty("repos")
     commits: list[dict] = load_or_empty("commits")
     detailed_commits: list[dict] = load_or_empty("detailed_commits")
@@ -88,6 +93,8 @@ def collect_dataset() -> None:
         repos = search_repos(
             language=REPO_LANGUAGE, min_stars=REPO_MIN_STARS, pushed_after=CUTOFF_DATE
         )
+
+    repos = repos[:max_repos]
 
     pipeline_position = len(GITHUB_TOKENS)
 
@@ -133,7 +140,10 @@ def collect_dataset() -> None:
                         lambda repo: (
                             repo,
                             get_repo_commits(
-                                repo["name"], repo["owner"]["login"], since=CUTOFF_DATE
+                                repo["name"],
+                                repo["owner"]["login"],
+                                since=CUTOFF_DATE,
+                                limit=max_commits_per_repo,
                             ),
                         ),
                         repos_to_fetch_commits,
@@ -171,7 +181,7 @@ def collect_dataset() -> None:
                 for commit in commits
                 if (commit["repo_owner"], commit["repo_name"], commit["sha"])
                 not in existing_detailed_commit_keys
-            ]
+            ][:max_commits]
 
             for index, detailed_commit in enumerate(
                 tqdm(
@@ -220,7 +230,7 @@ def collect_dataset() -> None:
                     file["sha"],
                 )
                 not in existing_file_keys
-            ]
+            ][:max_files]
 
             for index, file_content in enumerate(
                 tqdm(

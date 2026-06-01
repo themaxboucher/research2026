@@ -373,7 +373,10 @@ def get_repo_contributors(repo_name: str, repo_owner: str) -> list[dict]:
 
 
 def get_repo_commits(
-    repo_name: str, repo_owner: str, since: str = "2026-01-01"
+    repo_name: str,
+    repo_owner: str,
+    since: str,
+    limit: int | None = None,
 ) -> list[dict]:
     commits: list[dict] = []
     url_since = f"since={since}"
@@ -385,6 +388,8 @@ def get_repo_commits(
         response = _github_get(url)
         data = response.json()
         commits.extend(data)
+        if limit is not None and len(commits) >= limit:
+            return commits[:limit]
         url = response.links.get("next", {}).get("url")
     return commits
 
