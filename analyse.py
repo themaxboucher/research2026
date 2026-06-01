@@ -1,20 +1,18 @@
 import io
-import json
 import logging
-import re
 import tokenize
-from pathlib import Path
 
-from llms.open_router import get_completion
 from storage import load_from_json, save_to_json
 
 ANALYSED_DATASET_FILENAME = "files_analysed"
 
-CLASSIFY_COMMENT_MODEL = "meta-llama/llama-3.1-8b-instruct"
-CLASSIFY_COMMENT_PROMPT_PATH = Path(__file__).parent / "prompts" / "classify_comment.md"
-CODE_CONTEXT_LINES = 10
 
-FILE_ANALYSIS_LIMIT = 5
+def _extract_comment_tokens(file_content: str) -> list:
+    return [
+        tok
+        for tok in tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline)
+        if tok.type == tokenize.COMMENT
+    ]
 
 
 def count_loc(file_content: str) -> int:
@@ -22,130 +20,67 @@ def count_loc(file_content: str) -> int:
 
 
 def count_comments(file_content: str) -> int:
-    tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
-    return len([tok for tok in tokens if tok.type == tokenize.COMMENT])
+    return len(_extract_comment_tokens(file_content))
 
 
 def avg_comment_character_length(file_content: str) -> float:
-    tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
-    if len([tok for tok in tokens if tok.type == tokenize.COMMENT]) == 0:
-        return 0
-    return sum(
-        [
-            len(tok.string.rstrip("\r\n"))
-            for tok in tokens
-            if tok.type == tokenize.COMMENT
-        ]
-    ) / len([tok for tok in tokens if tok.type == tokenize.COMMENT])
-
-
-def get_code_context(
-    file_content: str,
-    start_line: int,
-    end_line: int,
-    context_lines: int = CODE_CONTEXT_LINES,
-) -> str:
-    lines = file_content.splitlines()
-    context_start = max(0, start_line - 1 - context_lines)
-    context_end = min(len(lines), end_line + context_lines)
-    return "\n".join(lines[context_start:context_end])
-
-
-def _load_classify_prompt(comment_text: str, code_context: str) -> str:
-    template = CLASSIFY_COMMENT_PROMPT_PATH.read_text(encoding="utf-8")
-    return template.replace("{comment_text}", comment_text).replace(
-        "{code_context}", code_context
-    )
-
-
-def _parse_classification_response(response: str) -> dict:
-    text = response.strip()
-    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if fence_match:
-        text = fence_match.group(1)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid classification JSON: {e}") from e
-
-
-def classify_comment(comment: dict, file_content: str) -> dict:
-    code_context = get_code_context(
-        file_content, comment["start_line"], comment["end_line"]
-    )
-    prompt = _load_classify_prompt(comment["comment"], code_context)
-    response = get_completion(CLASSIFY_COMMENT_MODEL, prompt)
-    return _parse_classification_response(response)
+    comment_tokens = _extract_comment_tokens(file_content)
+    if not comment_tokens:
+        return 0.0
+    total_character_count = sum(len(tok.string.rstrip("\r\n")) for tok in comment_tokens)
+    return total_character_count / len(comment_tokens)
 
 
 def analyse_file_content(file_content: str) -> dict:
-    loc = count_loc(file_content)
-    comments = count_comments(file_content)
-    comments_per_loc = comments / loc if loc else 0
+    line_count = count_loc(file_content)
+    comment_count = count_comments(file_content)
+    comments_per_loc = comment_count / line_count if line_count else 0.0
     avg_comment_length = avg_comment_character_length(file_content)
 
     return {
-        "loc": loc,
-        "comments": comments,
+        "loc": line_count,
+        "comments": comment_count,
         "comments_per_loc": comments_per_loc,
         "avg_comment_length": avg_comment_length,
     }
 
 
-def _enrich_comment(comment: dict, file_content: str) -> None:
-    classification = classify_comment(comment, file_content)
-    comment["classification"] = {
-        **classification,
-        "model": CLASSIFY_COMMENT_MODEL,
-        "prompt": CLASSIFY_COMMENT_PROMPT_PATH.name,
-    }
+def analyse_file_record(source_file: dict) -> None:
+    if source_file.get("content"):
+        source_file["original_metrics"] = analyse_file_content(source_file["content"])
 
-
-def analyse_file_record(file: dict) -> None:
-    if file.get("content"):
-        file["original_metrics"] = analyse_file_content(file["content"])
-
-    if file.get("generated_content"):
-        file["generated_metrics"] = analyse_file_content(file["generated_content"])
-
-    if file.get("comments"):
-        for comment in file["comments"]:
-            _enrich_comment(comment, file["content"])
-
-    if file.get("generated_comments"):
-        for comment in file["generated_comments"]:
-            _enrich_comment(comment, file["generated_content"])
+    if source_file.get("generated_content"):
+        source_file["generated_metrics"] = analyse_file_content(source_file["generated_content"])
 
 
 def analyse_dataset() -> None:
-    dataset = load_from_json("files_generated")
-    files_to_process = dataset[:FILE_ANALYSIS_LIMIT]
-    total = len(files_to_process)
-    logging.info("Analysing %d files...", total)
+    all_files = load_from_json("files_generated")
+    total_files = len(all_files)
+    logging.info("Analysing %d files...", total_files)
 
-    succeeded = 0
-    skipped = 0
+    succeeded_count = 0
+    skipped_count = 0
 
-    for index, file in enumerate(files_to_process, start=1):
+    for index, source_file in enumerate(all_files, start=1):
         logging.info(
             "Analysing %s (%d/%d)...",
-            file["filepath"],
+            source_file["filepath"],
             index,
-            total,
+            total_files,
         )
         try:
-            analyse_file_record(file)
-            succeeded += 1
-        except ValueError as e:
-            logging.warning("Skipping %s: %s", file["filepath"], e)
-            skipped += 1
+            analyse_file_record(source_file)
+            succeeded_count += 1
+        except ValueError as error:
+            logging.warning("Skipping %s: %s", source_file["filepath"], error)
+            skipped_count += 1
 
-    save_to_json(dataset, ANALYSED_DATASET_FILENAME)
+    save_to_json(all_files, ANALYSED_DATASET_FILENAME)
     logging.info(
         "Saved enriched dataset to data/%s.json (%d succeeded, %d skipped)",
         ANALYSED_DATASET_FILENAME,
-        succeeded,
-        skipped,
+        succeeded_count,
+        skipped_count,
     )
 
 
