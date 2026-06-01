@@ -3,92 +3,82 @@ import logging
 import re
 from pathlib import Path
 
-from llms.open_router import get_completion
+from llms.transformers import get_completion
 from storage import load_from_json, save_to_json
 from comments import get_comments_from_file
 
 GENERATED_DATASET_FILENAME = "files_generated"
-GENERATE_MODEL = "meta-llama/llama-3.1-8b-instruct"
-PROVIDER = {
-    "only": ["nebius/fp8", "groq"],
-    "allow_fallbacks": False,
-}  # only use the providers with the max output tokens
+GENERATE_MODEL = "HuggingFaceTB/SmolLM2-360M-Instruct"
 ZERO_SHOT_PROMPT_PATH = Path(__file__).parent / "prompts" / "zero_shot.md"
 
-FILE_GENERATION_LIMIT = 10
+FILE_GENERATION_LIMIT = 1
 
 
-def _load_zero_shot_prompt(code_file: str) -> str:
+def _load_zero_shot_prompt(source_code: str) -> str:
     template = ZERO_SHOT_PROMPT_PATH.read_text(encoding="utf-8")
-    return template.replace("{code_file}", code_file)
+    return template.replace("{code_file}", source_code)
 
 
-def _is_valid_python(source: str) -> tuple[bool, str | None]:
+def _assert_valid_python_syntax(source: str) -> None:
     try:
         ast.parse(source)
-        return True, None
     except SyntaxError as e:
-        return False, f"line {e.lineno}: {e.msg}"
+        raise ValueError(f"Generated code is not valid Python: line {e.lineno}: {e.msg}") from e
 
 
-def _parse_generated_code(response: str) -> str:
-    text = response.strip()
-    fence_match = re.search(r"```(?:python)?\s*\n?(.*?)```", text, re.DOTALL)
-    if fence_match:
-        code = fence_match.group(1).strip("\n") + "\n"
+def _parse_generated_code(llm_response: str) -> str:
+    stripped_response = llm_response.strip()
+    code_fence_match = re.search(r"```(?:python)?\s*\n?(.*?)```", stripped_response, re.DOTALL)
+    if code_fence_match:
+        extracted_code = code_fence_match.group(1).strip("\n") + "\n"
     else:
-        code = text if text.endswith("\n") else text + "\n"
-    valid, error = _is_valid_python(code)
-    if not valid:
-        raise ValueError(f"Generated code is not valid Python: {error}")
-
-    return code
+        extracted_code = stripped_response if stripped_response.endswith("\n") else stripped_response + "\n"
+    _assert_valid_python_syntax(extracted_code)
+    return extracted_code
 
 
-def generate_comments(file: dict) -> None:
-    prompt = _load_zero_shot_prompt(file["content_without_comments"])
-    response = get_completion(GENERATE_MODEL, prompt, PROVIDER)
-    generated_content = _parse_generated_code(response)
+def generate_comments(source_file: dict) -> None:
+    prompt = _load_zero_shot_prompt(source_file["content_without_comments"])
+    llm_response = get_completion(GENERATE_MODEL, prompt)
+    generated_content = _parse_generated_code(llm_response)
 
-    file["generated_content"] = generated_content
-    file["generated_comments"] = [
-        comment for comment in get_comments_from_file(generated_content)
-    ]
-    file["generation"] = {
+    source_file["generated_content"] = generated_content
+    source_file["generated_comments"] = get_comments_from_file(generated_content)
+    source_file["generation"] = {
         "model": GENERATE_MODEL,
         "prompt": ZERO_SHOT_PROMPT_PATH.name,
     }
 
 
 def generate_comments_for_dataset() -> None:
-    dataset = load_from_json("files")
-    files_to_process = dataset[:FILE_GENERATION_LIMIT]
-    total = len(files_to_process)
-    logging.info("Generating comments for %d files...", total)
+    all_files = load_from_json("files")
+    files_to_process = all_files[:FILE_GENERATION_LIMIT]
+    total_files = len(files_to_process)
+    logging.info("Generating comments for %d files...", total_files)
 
-    succeeded = 0
-    skipped = 0
+    succeeded_count = 0
+    skipped_count = 0
 
-    for index, file in enumerate(files_to_process, start=1):
+    for index, source_file in enumerate(files_to_process, start=1):
         logging.info(
             "Generating comments for %s (%d/%d)...",
-            file["filepath"],
+            source_file["filepath"],
             index,
-            total,
+            total_files,
         )
         try:
-            generate_comments(file)
-            succeeded += 1
-        except ValueError as e:
-            logging.warning("Skipping %s: %s", file["filepath"], e)
-            skipped += 1
+            generate_comments(source_file)
+            succeeded_count += 1
+        except ValueError as error:
+            logging.warning("Skipping %s: %s", source_file["filepath"], error)
+            skipped_count += 1
 
-    save_to_json(dataset, GENERATED_DATASET_FILENAME)
+    save_to_json(all_files, GENERATED_DATASET_FILENAME)
     logging.info(
         "Saved enriched dataset to data/%s.json (%d succeeded, %d skipped)",
         GENERATED_DATASET_FILENAME,
-        succeeded,
-        skipped,
+        succeeded_count,
+        skipped_count,
     )
 
 

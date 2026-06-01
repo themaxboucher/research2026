@@ -5,12 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "accelerate>=1.13.0",
     "google-genai>=2.7.0",
     "openai>=2.38.0",
     "openrouter>=0.9.1",
     "python-dotenv>=1.2.2",
     "requests>=2.34.2",
     "tqdm>=4.67.3",
+    "transformers>=5.9.0",
 ]
 
 [tool.pytest.ini_options]
