@@ -2,6 +2,7 @@ from collect import collect_dataset
 from analyse import analyse_dataset
 from generate import generate_comments_for_dataset
 from report import generate_report
+from runs import resolve_run_directory
 import argparse
 import logging
 
@@ -17,6 +18,11 @@ def parse_args():
     parser.add_argument("--analyse", action="store_true", help="Analyse collected data")
     parser.add_argument(
         "--report", action="store_true", help="Build dataset statistics and graphs"
+    )
+    parser.add_argument(
+        "--new-run",
+        action="store_true",
+        help="Start a fresh timestamped run directory instead of using the latest",
     )
 
     limits = parser.add_argument_group("limits (for testing on smaller batches)")
@@ -81,19 +87,23 @@ def main():
     )
 
     args = parse_args()
+    run_dir = resolve_run_directory(create_new_run=args.new_run)
+    logging.info("Using run directory: %s", run_dir)
+
     if args.collect:
         collect_dataset(
+            run_dir,
             max_repos=args.max_repos,
             max_commits_per_repo=args.max_commits_per_repo,
             max_commits=args.max_commits,
             max_files=args.max_files,
         )
     if args.generate:
-        generate_comments_for_dataset(limit=args.max_generate)
+        generate_comments_for_dataset(run_dir, limit=args.max_generate)
     if args.analyse:
-        analyse_dataset()
+        analyse_dataset(run_dir)
     if args.report:
-        generate_report()
+        generate_report(run_dir)
 
 
 if __name__ == "__main__":

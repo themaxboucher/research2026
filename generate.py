@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from llms.transformers import get_completion
+from runs import require_latest_run_directory
 from storage import load_from_json, save_to_json
 from comments import get_comments_from_file
 
@@ -48,8 +49,8 @@ def generate_comments(source_file: dict) -> None:
     }
 
 
-def generate_comments_for_dataset(limit: int | None = None) -> None:
-    all_files = load_from_json("files")
+def generate_comments_for_dataset(run_dir: Path, limit: int | None = None) -> None:
+    all_files = load_from_json(run_dir, "files")
     files_to_process = all_files[:limit]
     total_files = len(files_to_process)
     logging.info("Generating comments for %d files...", total_files)
@@ -71,14 +72,14 @@ def generate_comments_for_dataset(limit: int | None = None) -> None:
             logging.warning("Skipping %s: %s", source_file["filepath"], error)
             skipped_count += 1
 
-    save_to_json(all_files, GENERATED_DATASET_FILENAME)
+    save_to_json(all_files, run_dir, GENERATED_DATASET_FILENAME)
     logging.info(
-        "Saved enriched dataset to data/%s.json (%d succeeded, %d skipped)",
-        GENERATED_DATASET_FILENAME,
+        "Saved enriched dataset to %s (%d succeeded, %d skipped)",
+        run_dir / f"{GENERATED_DATASET_FILENAME}.json",
         succeeded_count,
         skipped_count,
     )
 
 
 if __name__ == "__main__":
-    generate_comments_for_dataset()
+    generate_comments_for_dataset(require_latest_run_directory())

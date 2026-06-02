@@ -9,10 +9,10 @@ matplotlib.use("Agg")  # headless backend so figures render without a display
 import matplotlib.pyplot as plt
 import pandas as pd
 
+from runs import require_latest_run_directory
 from storage import load_from_json
 
 ANALYSED_DATASET_FILENAME = "files_analysed"
-REPORTS_DIRECTORY = Path(__file__).parent / "reports"
 
 TOP_REPO_DISPLAY_COUNT = 20
 HISTOGRAM_BIN_COUNT = 30
@@ -90,8 +90,8 @@ def compute_per_repo_summary(file_metrics: pd.DataFrame) -> pd.DataFrame:
     return per_repo_summary.sort_values("file_count", ascending=False)
 
 
-def _save_figure(figure, output_filename: str) -> None:
-    figure.savefig(REPORTS_DIRECTORY / output_filename, dpi=150, bbox_inches="tight")
+def _save_figure(figure, reports_dir: Path, output_filename: str) -> None:
+    figure.savefig(reports_dir / output_filename, dpi=150, bbox_inches="tight")
     plt.close(figure)
 
 
@@ -100,6 +100,7 @@ def plot_histogram(
     title: str,
     x_axis_label: str,
     y_axis_label: str,
+    reports_dir: Path,
     output_filename: str,
 ) -> None:
     figure, axes = plt.subplots(figsize=(8, 5))
@@ -107,10 +108,10 @@ def plot_histogram(
     axes.set_title(title)
     axes.set_xlabel(x_axis_label)
     axes.set_ylabel(y_axis_label)
-    _save_figure(figure, output_filename)
+    _save_figure(figure, reports_dir, output_filename)
 
 
-def plot_loc_vs_comments(file_metrics: pd.DataFrame) -> None:
+def plot_loc_vs_comments(file_metrics: pd.DataFrame, reports_dir: Path) -> None:
     figure, axes = plt.subplots(figsize=(8, 5))
     axes.scatter(
         file_metrics["loc"],
@@ -121,28 +122,32 @@ def plot_loc_vs_comments(file_metrics: pd.DataFrame) -> None:
     axes.set_title("Lines of code vs. comment count")
     axes.set_xlabel("Lines of code")
     axes.set_ylabel("Comment count")
-    _save_figure(figure, "loc_vs_comments_scatter.png")
+    _save_figure(figure, reports_dir, "loc_vs_comments_scatter.png")
 
 
-def plot_top_repos_by_file_count(per_repo_summary: pd.DataFrame) -> None:
+def plot_top_repos_by_file_count(
+    per_repo_summary: pd.DataFrame, reports_dir: Path
+) -> None:
     top_repos = per_repo_summary.head(TOP_REPO_DISPLAY_COUNT).iloc[::-1]
     figure, axes = plt.subplots(figsize=(10, 6))
     axes.barh(top_repos.index, top_repos["file_count"], color=FIGURE_BAR_COLOR)
     axes.set_title(f"Top {TOP_REPO_DISPLAY_COUNT} repositories by file count")
     axes.set_xlabel("Number of files")
-    _save_figure(figure, "top_repos_by_file_count.png")
+    _save_figure(figure, reports_dir, "top_repos_by_file_count.png")
 
 
 def _render_all_plots(
     file_metrics: pd.DataFrame,
     comments: pd.DataFrame,
     per_repo_summary: pd.DataFrame,
+    reports_dir: Path,
 ) -> None:
     plot_histogram(
         file_metrics["loc"],
         "Distribution of file sizes",
         "Lines of code",
         "Number of files",
+        reports_dir,
         "loc_distribution.png",
     )
     plot_histogram(
@@ -150,6 +155,7 @@ def _render_all_plots(
         "Distribution of comment density",
         "Comments per line of code",
         "Number of files",
+        reports_dir,
         "comments_per_loc_distribution.png",
     )
     plot_histogram(
@@ -157,6 +163,7 @@ def _render_all_plots(
         "Distribution of average comment length",
         "Average comment length (characters)",
         "Number of files",
+        reports_dir,
         "avg_comment_length_distribution.png",
     )
     plot_histogram(
@@ -164,10 +171,11 @@ def _render_all_plots(
         "Comment density across repositories",
         "Mean comments per line of code",
         "Number of repositories",
+        reports_dir,
         "repo_comment_density_distribution.png",
     )
-    plot_loc_vs_comments(file_metrics)
-    plot_top_repos_by_file_count(per_repo_summary)
+    plot_loc_vs_comments(file_metrics, reports_dir)
+    plot_top_repos_by_file_count(per_repo_summary, reports_dir)
 
     if not comments.empty:
         plot_histogram(
@@ -175,17 +183,18 @@ def _render_all_plots(
             "Distribution of comment lengths",
             "Comment length (characters)",
             "Number of comments",
+            reports_dir,
             "comment_length_distribution.png",
         )
 
 
-def _write_summary_json(dataset_summary: dict) -> None:
-    summary_path = REPORTS_DIRECTORY / "summary.json"
+def _write_summary_json(dataset_summary: dict, reports_dir: Path) -> None:
+    summary_path = reports_dir / "summary.json"
     summary_path.write_text(json.dumps(dataset_summary, indent=2), encoding="utf-8")
 
 
-def _write_per_repo_csv(per_repo_summary: pd.DataFrame) -> None:
-    per_repo_summary.to_csv(REPORTS_DIRECTORY / "per_repo_metrics.csv")
+def _write_per_repo_csv(per_repo_summary: pd.DataFrame, reports_dir: Path) -> None:
+    per_repo_summary.to_csv(reports_dir / "per_repo_metrics.csv")
 
 
 def _log_dataset_summary(dataset_summary: dict) -> None:
@@ -194,8 +203,8 @@ def _log_dataset_summary(dataset_summary: dict) -> None:
         logging.info("  %s: %s", metric_name, metric_value)
 
 
-def generate_report() -> None:
-    analysed_files = load_from_json(ANALYSED_DATASET_FILENAME)
+def generate_report(run_dir: Path) -> None:
+    analysed_files = load_from_json(run_dir, ANALYSED_DATASET_FILENAME)
     file_metrics = build_file_metrics_dataframe(analysed_files)
 
     if file_metrics.empty:
@@ -203,17 +212,18 @@ def generate_report() -> None:
         return
 
     comments = build_comments_dataframe(analysed_files)
-    REPORTS_DIRECTORY.mkdir(exist_ok=True)
+    reports_dir = run_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     dataset_summary = compute_dataset_summary(file_metrics, comments)
     per_repo_summary = compute_per_repo_summary(file_metrics)
 
-    _write_summary_json(dataset_summary)
-    _write_per_repo_csv(per_repo_summary)
-    _render_all_plots(file_metrics, comments, per_repo_summary)
+    _write_summary_json(dataset_summary, reports_dir)
+    _write_per_repo_csv(per_repo_summary, reports_dir)
+    _render_all_plots(file_metrics, comments, per_repo_summary, reports_dir)
 
     _log_dataset_summary(dataset_summary)
-    logging.info("Report written to %s", REPORTS_DIRECTORY)
+    logging.info("Report written to %s", reports_dir)
 
 
 if __name__ == "__main__":
@@ -221,4 +231,4 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    generate_report()
+    generate_report(require_latest_run_directory())

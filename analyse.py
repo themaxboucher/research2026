@@ -1,7 +1,9 @@
 import io
 import logging
 import tokenize
+from pathlib import Path
 
+from runs import require_latest_run_directory
 from storage import load_from_json, save_to_json
 
 ANALYSED_DATASET_FILENAME = "files_analysed"
@@ -53,8 +55,8 @@ def analyse_file_record(source_file: dict) -> None:
         source_file["generated_metrics"] = analyse_file_content(source_file["generated_content"])
 
 
-def analyse_dataset() -> None:
-    all_files = load_from_json("files_generated")
+def analyse_dataset(run_dir: Path) -> None:
+    all_files = load_from_json(run_dir, "files_generated")
     total_files = len(all_files)
     logging.info("Analysing %d files...", total_files)
 
@@ -75,14 +77,14 @@ def analyse_dataset() -> None:
             logging.warning("Skipping %s: %s", source_file["filepath"], error)
             skipped_count += 1
 
-    save_to_json(all_files, ANALYSED_DATASET_FILENAME)
+    save_to_json(all_files, run_dir, ANALYSED_DATASET_FILENAME)
     logging.info(
-        "Saved enriched dataset to data/%s.json (%d succeeded, %d skipped)",
-        ANALYSED_DATASET_FILENAME,
+        "Saved enriched dataset to %s (%d succeeded, %d skipped)",
+        run_dir / f"{ANALYSED_DATASET_FILENAME}.json",
         succeeded_count,
         skipped_count,
     )
 
 
 if __name__ == "__main__":
-    analyse_dataset()
+    analyse_dataset(require_latest_run_directory())

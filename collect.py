@@ -11,6 +11,7 @@ from github import (
 from comments import get_comments_from_file, strip_comments_from_file
 from storage import load_from_json, save_to_json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 import logging
@@ -69,24 +70,27 @@ def add_contributor_count_to_repo(repo: dict) -> dict:
     }
 
 
-def load_or_empty(filename: str) -> list[dict]:
+def load_or_empty(directory: Path, filename: str) -> list[dict]:
     """Load a JSON file or return an empty list if the file does not exist."""
     try:
-        return load_from_json(filename)
+        return load_from_json(directory, filename)
     except FileNotFoundError:
         return []
 
 
 def collect_dataset(
+    run_dir: Path,
     max_repos: int | None = None,
     max_commits_per_repo: int | None = None,
     max_commits: int | None = None,
     max_files: int | None = None,
 ) -> None:
-    repos: list[dict] = load_or_empty("repos")
-    commits: list[dict] = load_or_empty("commits")
-    detailed_commits: list[dict] = load_or_empty("detailed_commits")
-    file_contents: list[dict] = load_or_empty("file_contents")
+    cache_dir = run_dir / "cache"
+
+    repos: list[dict] = load_or_empty(cache_dir, "repos")
+    commits: list[dict] = load_or_empty(cache_dir, "commits")
+    detailed_commits: list[dict] = load_or_empty(cache_dir, "detailed_commits")
+    file_contents: list[dict] = load_or_empty(cache_dir, "file_contents")
 
     if len(repos) == 0:
         logging.info("Searching for repositories...")
@@ -120,7 +124,7 @@ def collect_dataset(
                 for repo in repos_with_contributor_counts
                 if repo["contributors_count"] >= REPO_MIN_CONTRIBUTORS
             ]
-            save_to_json(repos, "repos")
+            save_to_json(repos, cache_dir, "repos")
 
             logging.info("Total repositories: %d", len(repos))
 
@@ -167,7 +171,7 @@ def collect_dataset(
                 commits.extend(commits_to_add)
 
                 if index % SAVE_EVERY == 0:
-                    save_to_json(commits_to_add, "commits")
+                    save_to_json(commits_to_add, cache_dir, "commits")
 
             logging.info("Total commits: %d", len(commits))
 
@@ -200,7 +204,7 @@ def collect_dataset(
             ):
                 detailed_commits.append(detailed_commit)
                 if index % SAVE_EVERY == 0:
-                    save_to_json(detailed_commits, "detailed_commits")
+                    save_to_json(detailed_commits, cache_dir, "detailed_commits")
 
             commit_files: list[dict] = [
                 {
@@ -252,7 +256,7 @@ def collect_dataset(
             ):
                 file_contents.append(file_content)
                 if index % SAVE_EVERY == 0:
-                    save_to_json(file_contents, "file_contents")
+                    save_to_json(file_contents, cache_dir, "file_contents")
 
             processed_files: list[dict | None] = [
                 process_file(file)
@@ -277,4 +281,4 @@ def collect_dataset(
 
     if files:
         logging.info("Saving data to JSON...")
-        save_to_json(files, "files")
+        save_to_json(files, run_dir, "files")
