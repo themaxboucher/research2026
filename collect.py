@@ -95,7 +95,10 @@ def collect_dataset(
     if len(repos) == 0:
         logging.info("Searching for repositories...")
         repos = search_repos(
-            language=REPO_LANGUAGE, min_stars=REPO_MIN_STARS, pushed_after=CUTOFF_DATE
+            language=REPO_LANGUAGE, 
+            min_stars=REPO_MIN_STARS, 
+            pushed_after=CUTOFF_DATE,
+            limit=max_repos,
         )
 
     repos = repos[:max_repos]

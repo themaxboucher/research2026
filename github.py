@@ -19,7 +19,7 @@ GITHUB_SEARCH_RATE_LIMIT_PER_MINUTE = 30  # GitHub REST API limit search queries
 GITHUB_SEARCH_RESULT_LIMIT = 1000  # GitHub REST API limit search queries to 1000 results (https://docs.github.com/en/rest/search/search?apiVersion=2026-03-10#search-repositories)
 SEARCH_MAX_WORKERS = 8
 
-SearchPartition = tuple[int, int, str, str]
+SearchPartition = tuple[int, int | None, str, str | None]
 
 
 def _load_github_tokens() -> list[str]:
@@ -315,7 +315,7 @@ def _partition_repo_searches(
     return safe_partitions
 
 
-def _search_repos_in_partition(language: str, partition: SearchPartition) -> list[dict]:
+def _search_repos_in_partition(language: str, partition: SearchPartition, limit: int | None = None) -> list[dict]:
     repos: list[dict] = []
     min_stars, max_stars, min_pushed_date, max_pushed_date = partition
     query = _build_search_query(
@@ -327,6 +327,8 @@ def _search_repos_in_partition(language: str, partition: SearchPartition) -> lis
     while url:
         response = _github_get(url)
         repos.extend(response.json().get("items", []))
+        if limit is not None and len(repos) >= limit:
+            return repos
         url = response.links.get("next", {}).get("url")
     return repos
 
@@ -336,7 +338,10 @@ def _deduplicate_repos(repos: list[dict]) -> list[dict]:
     return list(repos_by_id.values())
 
 
-def search_repos(language: str, min_stars: int, pushed_after: str) -> list[dict]:
+def search_repos(language: str, min_stars: int, pushed_after: str, limit: int | None = None) -> list[dict]:
+    if limit is not None and limit < GITHUB_SEARCH_RESULT_LIMIT:
+        whole_search_partition = (min_stars, None, pushed_after, None)
+        return _search_repos_in_partition(language, whole_search_partition) 
     search_partitions = _partition_repo_searches(language, min_stars, pushed_after)
     repos: list[dict] = []
 

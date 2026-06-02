@@ -63,13 +63,7 @@ def analyse_dataset(run_dir: Path) -> None:
     succeeded_count = 0
     skipped_count = 0
 
-    for index, source_file in enumerate(all_files, start=1):
-        logging.info(
-            "Analysing %s (%d/%d)...",
-            source_file["filepath"],
-            index,
-            total_files,
-        )
+    for source_file in all_files:
         try:
             analyse_file_record(source_file)
             succeeded_count += 1

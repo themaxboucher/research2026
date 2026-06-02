@@ -197,12 +197,6 @@ def _write_per_repo_csv(per_repo_summary: pd.DataFrame, reports_dir: Path) -> No
     per_repo_summary.to_csv(reports_dir / "per_repo_metrics.csv")
 
 
-def _log_dataset_summary(dataset_summary: dict) -> None:
-    logging.info("Dataset summary:")
-    for metric_name, metric_value in dataset_summary.items():
-        logging.info("  %s: %s", metric_name, metric_value)
-
-
 def generate_report(run_dir: Path) -> None:
     analysed_files = load_from_json(run_dir, ANALYSED_DATASET_FILENAME)
     file_metrics = build_file_metrics_dataframe(analysed_files)
@@ -222,7 +216,6 @@ def generate_report(run_dir: Path) -> None:
     _write_per_repo_csv(per_repo_summary, reports_dir)
     _render_all_plots(file_metrics, comments, per_repo_summary, reports_dir)
 
-    _log_dataset_summary(dataset_summary)
     logging.info("Report written to %s", reports_dir)
 
 
