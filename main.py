@@ -1,5 +1,4 @@
 from collect import collect_dataset
-from analyse import analyse_dataset
 from generate import generate_comments_for_dataset
 from report import generate_report
 from runs import resolve_run_directory
@@ -15,7 +14,6 @@ def parse_args():
     parser.add_argument(
         "--generate", action="store_true", help="Generate comments for collected data"
     )
-    parser.add_argument("--analyse", action="store_true", help="Analyse collected data")
     parser.add_argument(
         "--report", action="store_true", help="Build dataset statistics and graphs"
     )
@@ -59,15 +57,11 @@ def parse_args():
     args = parser.parse_args()
 
     no_stage_selected = (
-        not args.collect
-        and not args.generate
-        and not args.analyse
-        and not args.report
+        not args.collect and not args.generate and not args.report
     )
     if no_stage_selected:
         args.collect = True
         args.generate = True
-        args.analyse = True
         args.report = True
 
     if args.smoke_test:
@@ -100,8 +94,6 @@ def main():
         )
     if args.generate:
         generate_comments_for_dataset(run_dir, limit=args.max_generate)
-    if args.analyse:
-        analyse_dataset(run_dir)
     if args.report:
         generate_report(run_dir)
 
