@@ -25,7 +25,19 @@ def parse_args():
 
     limits = parser.add_argument_group("limits (for testing on smaller batches)")
     limits.add_argument(
-        "--max-repos", type=int, default=None, help="Limit number of repos processed"
+        "--max-repos", type=int, default=1000, help="Limit number of repos processed"
+    )
+    limits.add_argument(
+        "--repo-min-stars",
+        type=int,
+        default=0,
+        help="Only include repos with at least this many stars",
+    )
+    limits.add_argument(
+        "--repo-min-contributors",
+        type=int,
+        default=0,
+        help="Drop repos with fewer than this many contributors",
     )
     limits.add_argument(
         "--max-commits-per-repo",
@@ -88,6 +100,8 @@ def main():
         collect_dataset(
             run_dir,
             max_repos=args.max_repos,
+            repo_min_stars=args.repo_min_stars,
+            repo_min_contributors=args.repo_min_contributors,
             max_commits_per_repo=args.max_commits_per_repo,
             max_commits=args.max_commits,
             max_files=args.max_files,

@@ -26,8 +26,6 @@ MAX_WORKERS = 8
 # Qwen...
 
 REPO_LANGUAGE = "Python"
-REPO_MIN_STARS = 20
-REPO_MIN_CONTRIBUTORS = 5
 CUTOFF_DATE = "2025-02-01"
 
 SAVE_EVERY = 100
@@ -81,6 +79,8 @@ def load_or_empty(directory: Path, filename: str) -> list[dict]:
 def collect_dataset(
     run_dir: Path,
     max_repos: int | None = None,
+    repo_min_stars: int = 0,
+    repo_min_contributors: int = 0,
     max_commits_per_repo: int | None = None,
     max_commits: int | None = None,
     max_files: int | None = None,
@@ -95,8 +95,8 @@ def collect_dataset(
     if len(repos) == 0:
         logging.info("Searching for repositories...")
         repos = search_repos(
-            language=REPO_LANGUAGE, 
-            min_stars=REPO_MIN_STARS, 
+            language=REPO_LANGUAGE,
+            min_stars=repo_min_stars,
             pushed_after=CUTOFF_DATE,
             limit=max_repos,
         )
@@ -125,8 +125,9 @@ def collect_dataset(
             repos = [
                 repo
                 for repo in repos_with_contributor_counts
-                if repo["contributors_count"] >= REPO_MIN_CONTRIBUTORS
+                if repo["contributors_count"] >= repo_min_contributors
             ]
+
             save_to_json(repos, cache_dir, "repos")
 
             logging.info("Total repositories: %d", len(repos))

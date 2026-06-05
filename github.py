@@ -339,7 +339,7 @@ def _deduplicate_repos(repos: list[dict]) -> list[dict]:
 
 
 def search_repos(language: str, min_stars: int, pushed_after: str, limit: int | None = None) -> list[dict]:
-    if limit is not None and limit < GITHUB_SEARCH_RESULT_LIMIT:
+    if limit is not None and limit <= GITHUB_SEARCH_RESULT_LIMIT:
         whole_search_partition = (min_stars, None, pushed_after, None)
         return _search_repos_in_partition(language, whole_search_partition) 
     search_partitions = _partition_repo_searches(language, min_stars, pushed_after)
