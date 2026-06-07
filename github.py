@@ -315,7 +315,9 @@ def _partition_repo_searches(
     return safe_partitions
 
 
-def _search_repos_in_partition(language: str, partition: SearchPartition, limit: int | None = None) -> list[dict]:
+def _search_repos_in_partition(
+    language: str, partition: SearchPartition, limit: int | None = None
+) -> list[dict]:
     repos: list[dict] = []
     min_stars, max_stars, min_pushed_date, max_pushed_date = partition
     query = _build_search_query(
@@ -338,10 +340,12 @@ def _deduplicate_repos(repos: list[dict]) -> list[dict]:
     return list(repos_by_id.values())
 
 
-def search_repos(language: str, min_stars: int, pushed_after: str, limit: int | None = None) -> list[dict]:
+def search_repos(
+    language: str, min_stars: int, pushed_after: str, limit: int | None = None
+) -> list[dict]:
     if limit is not None and limit <= GITHUB_SEARCH_RESULT_LIMIT:
         whole_search_partition = (min_stars, None, pushed_after, None)
-        return _search_repos_in_partition(language, whole_search_partition) 
+        return _search_repos_in_partition(language, whole_search_partition)
     search_partitions = _partition_repo_searches(language, min_stars, pushed_after)
     repos: list[dict] = []
 
@@ -408,16 +412,11 @@ def get_commit(repo_owner: str, repo_name: str, commit_sha: str) -> dict:
     return data
 
 
-def get_file_contents(
-    repo_owner: str, repo_name: str, filepath: str, commit_sha: str
-) -> dict:
-    url = f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{commit_sha}/{filepath}"
+def get_file_contents(file: dict) -> dict:
+    url = f"https://raw.githubusercontent.com/{file['repo_owner']}/{file['repo_name']}/{file['sha']}/{file['filename']}"
     response = _github_get(url)
-    data = {
-        "repo_owner": repo_owner,
-        "repo_name": repo_name,
-        "filepath": filepath,
-        "sha": commit_sha,
+    return {
+        **file,
+        "filepath": file["filename"],
         "content": response.text,
     }
-    return data

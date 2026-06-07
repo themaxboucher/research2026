@@ -28,14 +28,16 @@ MAX_WORKERS = 8
 REPO_LANGUAGE = "Python"
 CUTOFF_DATE = "2025-02-01"
 
-SAVE_EVERY = 100
+CACHE_EVERY = 100
 
 
 def get_files_from_commit(commit: dict) -> list[dict]:
+    statuses_to_include = ["added", "modified", "removed"]
     return [
         file
         for file in commit["files"]
-        if file.get("status") == "added" and file["filename"].endswith(".py")
+        if file.get("status") in statuses_to_include
+        and file["filename"].endswith(".py")
     ]
 
 
@@ -174,7 +176,7 @@ def collect_dataset(
                 ]
                 commits.extend(commits_to_add)
 
-                if index % SAVE_EVERY == 0:
+                if index % CACHE_EVERY == 0:
                     save_to_json(commits_to_add, cache_dir, "commits")
 
             logging.info("Total commits: %d", len(commits))
@@ -207,7 +209,7 @@ def collect_dataset(
                 )
             ):
                 detailed_commits.append(detailed_commit)
-                if index % SAVE_EVERY == 0:
+                if index % CACHE_EVERY == 0:
                     save_to_json(detailed_commits, cache_dir, "detailed_commits")
 
             commit_files: list[dict] = [
@@ -216,6 +218,7 @@ def collect_dataset(
                     "repo_owner": commit["repo_owner"],
                     "repo_name": commit["repo_name"],
                     "sha": commit["sha"],
+                    "date": commit["commit"]["committer"]["date"],
                 }
                 for commit in detailed_commits
                 for file in get_files_from_commit(commit)
@@ -243,12 +246,7 @@ def collect_dataset(
             for index, file_content in enumerate(
                 tqdm(
                     executor.map(
-                        lambda file: get_file_contents(
-                            file["repo_owner"],
-                            file["repo_name"],
-                            file["filename"],
-                            file["sha"],
-                        ),
+                        lambda file: get_file_contents(file),
                         commit_files_to_fetch,
                     ),
                     total=len(commit_files_to_fetch),
@@ -259,7 +257,7 @@ def collect_dataset(
                 )
             ):
                 file_contents.append(file_content)
-                if index % SAVE_EVERY == 0:
+                if index % CACHE_EVERY == 0:
                     save_to_json(file_contents, cache_dir, "file_contents")
 
             processed_files: list[dict | None] = [
