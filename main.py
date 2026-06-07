@@ -77,11 +77,9 @@ def parse_args():
         args.report = True
 
     if args.smoke_test:
-        args.max_repos = args.max_repos or 10
-        args.max_commits_per_repo = args.max_commits_per_repo or 100
-        args.max_commits = args.max_commits or None
-        args.max_files = args.max_files or None
-        args.max_generate = args.max_generate or 3
+        args.max_repos = 10
+        args.max_commits_per_repo = 100
+        args.max_generate = 3
 
     return args
 

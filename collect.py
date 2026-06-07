@@ -41,20 +41,52 @@ def get_files_from_commit(commit: dict) -> list[dict]:
     ]
 
 
+def enrich_file(file: dict) -> dict:
+    repo_owner = file["repo_owner"]
+    repo_name = file["repo_name"]
+    filename = file["filename"]
+    status = file.get("status")
+    sha = file.get("sha")
+    parent_sha = file.get("parent_sha")
+
+    is_removed = status == "removed"
+    is_added = status == "added"
+
+    content = None
+    if not is_removed and sha:
+        content = get_file_contents(repo_owner, repo_name, sha, filename)
+
+    previous_content = None
+    if not is_added and parent_sha:
+        previous_content = get_file_contents(
+            repo_owner, repo_name, parent_sha, filename
+        )
+
+    return {
+        **file,
+        "filepath": filename,
+        "content": content,
+        "previous_content": previous_content,
+    }
+
+
 def process_file(file: dict) -> dict | None:
     try:
         return {
             **file,
-            "content_without_comments": strip_comments_from_file(file["content"]),
-            "comments": get_comments_from_file(file["content"]),
+            "content_without_comments": strip_comments_from_file(file.get("content")),
+            "previous_content_without_comments": strip_comments_from_file(
+                file.get("previous_content")
+            ),
+            "comments": get_comments_from_file(file),
         }
-    except (tokenize.TokenError, IndentationError, SyntaxError) as e:
+    except (tokenize.TokenError, IndentationError, SyntaxError) as error:
         logging.warning(
             "Skipping file %s/%s/%s: tokenization failed (%s)",
             file.get("repo_owner"),
             file.get("repo_name"),
-            file.get("filepath"),
-            e,
+            file.get("filename"),
+            error,
         )
         return None
 
@@ -218,6 +250,7 @@ def collect_dataset(
                     "repo_owner": commit["repo_owner"],
                     "repo_name": commit["repo_name"],
                     "sha": commit["sha"],
+                    "parent_sha": commit["parents"][0]["sha"] if commit["parents"] else None,
                     "date": commit["commit"]["committer"]["date"],
                 }
                 for commit in detailed_commits
@@ -246,7 +279,7 @@ def collect_dataset(
             for index, file_content in enumerate(
                 tqdm(
                     executor.map(
-                        lambda file: get_file_contents(file),
+                        enrich_file,
                         commit_files_to_fetch,
                     ),
                     total=len(commit_files_to_fetch),

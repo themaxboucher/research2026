@@ -412,11 +412,7 @@ def get_commit(repo_owner: str, repo_name: str, commit_sha: str) -> dict:
     return data
 
 
-def get_file_contents(file: dict) -> dict:
-    url = f"https://raw.githubusercontent.com/{file['repo_owner']}/{file['repo_name']}/{file['sha']}/{file['filename']}"
+def get_file_contents(repo_owner: str, repo_name: str, sha: str, filename: str) -> str:
+    url = f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/{sha}/{filename}"
     response = _github_get(url)
-    return {
-        **file,
-        "filepath": file["filename"],
-        "content": response.text,
-    }
+    return response.text
