@@ -84,7 +84,7 @@ def _collect_comment_entries(file_content: str) -> list[dict]:
     return comment_entries
 
 
-def _extract_comments(
+def extract_comments(
     file_content: str | None, include_docstrings: bool = True
 ) -> list[dict]:
     if not file_content:
@@ -176,12 +176,9 @@ def _annotate_comments(
     return annotated_comments
 
 
-def get_comments_from_file(file: dict, include_docstrings: bool = True) -> list[dict]:
-    file_content = file.get("content")
-    previous_content = file.get("previous_content")
-    new_comments = _extract_comments(file_content, include_docstrings)
-    old_comments = _extract_comments(previous_content, include_docstrings)
-
+def get_comments_from_file(file_content: str, previous_file_content: str) -> list[dict]:
+    new_comments = extract_comments(file_content)
+    old_comments = extract_comments(previous_file_content)
     return _annotate_comments(new_comments, old_comments)
 
 

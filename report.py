@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from runs import require_latest_run_directory
-from storage import load_from_json
+from storage import load_from_jsonl
 
 GENERATED_DATASET_FILENAME = "files_generated"
 ORIGINAL_SOURCE_LABEL = "original"
@@ -282,7 +282,7 @@ def _write_summary_csv(summary: pd.DataFrame, reports_dir: Path) -> None:
 
 
 def generate_report(run_dir: Path) -> None:
-    generated_files = load_from_json(run_dir, GENERATED_DATASET_FILENAME)
+    generated_files = load_from_jsonl(run_dir, GENERATED_DATASET_FILENAME)
     file_metrics = build_file_metrics_dataframe(generated_files)
 
     if file_metrics.empty:

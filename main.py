@@ -40,21 +40,6 @@ def parse_args():
         help="Drop repos with fewer than this many contributors",
     )
     limits.add_argument(
-        "--max-commits-per-repo",
-        type=int,
-        default=None,
-        help="Limit commits fetched per repo",
-    )
-    limits.add_argument(
-        "--max-commits",
-        type=int,
-        default=None,
-        help="Limit total commit-detail fetches",
-    )
-    limits.add_argument(
-        "--max-files", type=int, default=None, help="Limit total file-content fetches"
-    )
-    limits.add_argument(
         "--max-generate",
         type=int,
         default=None,
@@ -78,18 +63,12 @@ def parse_args():
 
     if args.smoke_test:
         args.max_repos = 10
-        args.max_commits_per_repo = 100
         args.max_generate = 3
 
     return args
 
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-
     args = parse_args()
     run_dir = resolve_run_directory(create_new_run=args.new_run)
     logging.info("Using run directory: %s", run_dir)
@@ -99,10 +78,6 @@ def main():
             run_dir,
             max_repos=args.max_repos,
             repo_min_stars=args.repo_min_stars,
-            repo_min_contributors=args.repo_min_contributors,
-            max_commits_per_repo=args.max_commits_per_repo,
-            max_commits=args.max_commits,
-            max_files=args.max_files,
         )
     if args.generate:
         generate_comments_for_dataset(run_dir, limit=args.max_generate)
