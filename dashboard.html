@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>repo_files dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-subtle: #f6f8fa;
+    --border: #d0d7de;
+    --text: #1f2328;
+    --text-muted: #57606a;
+    --accent: #0969da;
+    --chip-add: #dafbe1;
+    --chip-add-fg: #1a7f37;
+    --chip-modify: #fff8c5;
+    --chip-modify-fg: #9a6700;
+    --chip-delete: #ffebe9;
+    --chip-delete-fg: #cf222e;
+    --chip-rename: #ddf4ff;
+    --chip-rename-fg: #0969da;
+    --chip-default: #eaeef2;
+    --chip-default-fg: #57606a;
+    --comment-marker: #ffaa33;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header.topbar {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  header.topbar h1 { font-size: 14px; margin: 0; font-weight: 600; }
+  header.topbar .meta { font-size: 12px; color: var(--text-muted); }
+  main {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+  aside.sidebar {
+    width: 360px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-subtle);
+    flex-shrink: 0;
+  }
+  .sidebar-controls {
+    padding: 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .sidebar-controls input[type="text"] {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--bg);
+  }
+  .filter-row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .filter-row label {
+    font-size: 11px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    cursor: pointer;
+    background: var(--bg);
+    user-select: none;
+  }
+  .filter-row input[type="checkbox"] { display: none; }
+  .filter-row label.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .sidebar-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 4px;
+  }
+  ul.records {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+  }
+  ul.records li {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  ul.records li:hover { background: #eef2f6; }
+  ul.records li.selected { background: #ddebf7; }
+  ul.records .row1 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  ul.records .filename {
+    font-weight: 600;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+  }
+  ul.records .nloc {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+  }
+  ul.records .row2 {
+    color: var(--text-muted);
+    font-size: 11px;
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    background: var(--chip-default);
+    color: var(--chip-default-fg);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .chip.ADD { background: var(--chip-add); color: var(--chip-add-fg); }
+  .chip.MODIFY { background: var(--chip-modify); color: var(--chip-modify-fg); }
+  .chip.DELETE { background: var(--chip-delete); color: var(--chip-delete-fg); }
+  .chip.RENAME { background: var(--chip-rename); color: var(--chip-rename-fg); }
+  section.detail {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .detail-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  .detail-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+    word-break: break-all;
+  }
+  .detail-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    word-break: break-all;
+  }
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11px;
+  }
+  .badge {
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-subtle);
+  }
+  .badge.add { color: var(--chip-add-fg); }
+  .badge.del { color: var(--chip-delete-fg); }
+  .tabs {
+    display: flex;
+    gap: 0;
+    padding: 0 12px;
+    background: var(--bg-subtle);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow-x: auto;
+  }
+  .tabs button {
+    background: none;
+    border: none;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-muted);
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
+  .tabs button:hover { color: var(--text); }
+  .tabs button.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+  .tab-panel {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg);
+  }
+  .tab-panel.hidden { display: none; }
+  .empty-state {
+    padding: 40px;
+    color: var(--text-muted);
+    font-size: 14px;
+    text-align: center;
+  }
+
+  /* Code block with line numbers + comment gutter markers */
+  .code-wrap {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .code-wrap pre { margin: 0; }
+  .code-line {
+    display: grid;
+    grid-template-columns: 32px 14px 1fr;
+    align-items: start;
+  }
+  .code-line .lineno {
+    text-align: right;
+    padding-right: 8px;
+    color: var(--text-muted);
+    user-select: none;
+    background: var(--bg-subtle);
+    border-right: 1px solid var(--border);
+  }
+  .code-line .marker {
+    background: var(--bg-subtle);
+    border-right: 1px solid var(--border);
+  }
+  .code-line.has-comment .marker {
+    background: var(--comment-marker);
+  }
+  .code-line .content {
+    padding-left: 8px;
+    white-space: pre;
+    overflow-x: visible;
+  }
+
+  /* Comments tab */
+  table.comments-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  table.comments-table th, table.comments-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+  }
+  table.comments-table th {
+    background: var(--bg-subtle);
+    position: sticky;
+    top: 0;
+    font-weight: 600;
+  }
+  table.comments-table .comment-text {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-width: 0;
+  }
+  .comment-type-chip {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .comment-type-chip.inline { background: #ddf4ff; color: #0969da; }
+  .comment-type-chip.block { background: #fff8c5; color: #9a6700; }
+  .comment-type-chip.docstring { background: #dafbe1; color: #1a7f37; }
+
+  /* diff2html tweaks */
+  .d2h-wrapper { padding: 8px 16px; }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <h1>repo_files dashboard</h1>
+  <span class="meta" id="dataset-meta"></span>
+</header>
+<main>
+  <aside class="sidebar">
+    <div class="sidebar-controls">
+      <input type="text" id="search" placeholder="Search filename / path / repo">
+      <div class="filter-row" id="change-type-filters"></div>
+      <div class="sidebar-count" id="sidebar-count"></div>
+    </div>
+    <ul class="records" id="records-list"></ul>
+  </aside>
+  <section class="detail">
+    <div class="detail-header" id="detail-header">
+      <div class="empty-state">Select a record from the list</div>
+    </div>
+    <div class="tabs" id="tabs" style="display:none;"></div>
+    <div class="tab-panel" id="tab-panel"></div>
+  </section>
+</main>
+
+<script>
+const TABS = [
+  { id: "diff",   label: "Diff" },
+  { id: "cur",    label: "Current" },
+  { id: "prev",   label: "Previous" },
+  { id: "curnc",  label: "Current (no comments)" },
+  { id: "prevnc", label: "Previous (no comments)" },
+  { id: "comments", label: "Comments" },
+  { id: "raw",    label: "Raw JSON" },
+];
+
+const state = {
+  sidebar: [],
+  filteredIndices: [],
+  search: "",
+  activeChangeTypes: new Set(),
+  selectedIndex: null,
+  currentRecord: null,
+  activeTab: "diff",
+};
+
+async function loadSidebar() {
+  const response = await fetch("/records");
+  state.sidebar = await response.json();
+  document.getElementById("dataset-meta").textContent =
+    `${state.sidebar.length} records`;
+  initChangeTypeFilters();
+  applyFilters();
+}
+
+function initChangeTypeFilters() {
+  const types = Array.from(new Set(state.sidebar.map(r => r.change_type).filter(Boolean))).sort();
+  state.activeChangeTypes = new Set(types);
+  const container = document.getElementById("change-type-filters");
+  container.innerHTML = "";
+  for (const type of types) {
+    const label = document.createElement("label");
+    label.className = "active";
+    label.textContent = type;
+    label.dataset.type = type;
+    label.addEventListener("click", () => {
+      if (state.activeChangeTypes.has(type)) {
+        state.activeChangeTypes.delete(type);
+        label.classList.remove("active");
+      } else {
+        state.activeChangeTypes.add(type);
+        label.classList.add("active");
+      }
+      applyFilters();
+    });
+    container.appendChild(label);
+  }
+}
+
+function applyFilters() {
+  const query = state.search.trim().toLowerCase();
+  state.filteredIndices = state.sidebar
+    .filter(r => state.activeChangeTypes.has(r.change_type))
+    .filter(r => {
+      if (!query) return true;
+      const hay = [r.filename, r.new_path, r.repo_name].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(query);
+    })
+    .map(r => r.index);
+  renderSidebar();
+}
+
+function renderSidebar() {
+  const list = document.getElementById("records-list");
+  list.innerHTML = "";
+  for (const idx of state.filteredIndices) {
+    const r = state.sidebar[idx];
+    const li = document.createElement("li");
+    li.dataset.index = String(idx);
+    if (state.selectedIndex === idx) li.classList.add("selected");
+
+    const row1 = document.createElement("div");
+    row1.className = "row1";
+    const chip = document.createElement("span");
+    chip.className = "chip " + (r.change_type || "");
+    chip.textContent = r.change_type || "?";
+    const name = document.createElement("span");
+    name.className = "filename";
+    name.textContent = r.new_path || r.filename || `#${idx}`;
+    name.title = r.new_path || r.filename || "";
+    const nloc = document.createElement("span");
+    nloc.className = "nloc";
+    nloc.textContent = r.nloc != null ? `${r.nloc} loc` : "";
+    row1.append(chip, name, nloc);
+
+    const row2 = document.createElement("div");
+    row2.className = "row2";
+    const repo = r.repo_name || "?";
+    const hash = r.commit_hash ? r.commit_hash.slice(0, 7) : "";
+    row2.textContent = hash ? `${repo} @ ${hash}` : repo;
+    row2.title = row2.textContent;
+
+    li.append(row1, row2);
+    li.addEventListener("click", () => selectRecord(idx));
+    list.appendChild(li);
+  }
+  document.getElementById("sidebar-count").textContent =
+    `${state.filteredIndices.length} of ${state.sidebar.length} shown`;
+}
+
+async function selectRecord(index) {
+  state.selectedIndex = index;
+  renderSidebar();
+  const response = await fetch(`/records/${index}`);
+  state.currentRecord = await response.json();
+  renderDetailHeader();
+  renderTabs();
+  renderActiveTab();
+}
+
+function renderDetailHeader() {
+  const r = state.currentRecord;
+  const header = document.getElementById("detail-header");
+  const hashShort = r.commit_hash ? r.commit_hash.slice(0, 7) : "";
+  header.innerHTML = `
+    <div class="detail-title">${escapeHTML(r.new_path || r.filename || "")}</div>
+    <div class="detail-sub">
+      ${escapeHTML(r.repo_name || "(no repo)")}${hashShort ? " @ " + escapeHTML(hashShort) : ""}
+    </div>
+    <div class="badges">
+      <span class="chip ${r.change_type || ""}">${escapeHTML(r.change_type || "")}</span>
+      <span class="badge add">+${r.added_lines ?? 0}</span>
+      <span class="badge del">-${r.deleted_lines ?? 0}</span>
+      <span class="badge">nloc ${r.nloc ?? "?"}</span>
+      <span class="badge">complexity ${r.complexity ?? "?"}</span>
+      <span class="badge">tokens ${r.token_count ?? "?"}</span>
+      <span class="badge">${(r.comments || []).length} comments</span>
+    </div>
+  `;
+}
+
+function renderTabs() {
+  const tabs = document.getElementById("tabs");
+  tabs.style.display = "flex";
+  tabs.innerHTML = "";
+  for (const tab of TABS) {
+    const button = document.createElement("button");
+    button.textContent = tab.label;
+    if (tab.id === state.activeTab) button.classList.add("active");
+    button.addEventListener("click", () => {
+      state.activeTab = tab.id;
+      renderTabs();
+      renderActiveTab();
+    });
+    tabs.appendChild(button);
+  }
+}
+
+function renderActiveTab() {
+  const panel = document.getElementById("tab-panel");
+  panel.innerHTML = "";
+  const r = state.currentRecord;
+  if (!r) return;
+
+  switch (state.activeTab) {
+    case "diff":     return renderDiff(panel, r);
+    case "cur":      return renderCode(panel, r.source_code, r.comments || []);
+    case "prev":     return renderCode(panel, r.previous_source_code, []);
+    case "curnc":    return renderCode(panel, r.source_code_without_comments, []);
+    case "prevnc":   return renderCode(panel, r.previous_source_code_without_comments, []);
+    case "comments": return renderComments(panel, r.comments || []);
+    case "raw":      return renderRaw(panel, r);
+  }
+}
+
+function renderDiff(panel, record) {
+  if (!record.diff) {
+    panel.innerHTML = `<div class="empty-state">No diff available.</div>`;
+    return;
+  }
+  const fakePath = record.new_path || record.filename || "file.py";
+  const unified =
+    `diff --git a/${fakePath} b/${fakePath}\n` +
+    `--- a/${fakePath}\n+++ b/${fakePath}\n` +
+    record.diff;
+  const ui = new Diff2HtmlUI(panel, unified, {
+    drawFileList: false,
+    matching: "lines",
+    outputFormat: "side-by-side",
+    highlight: true,
+  });
+  ui.draw();
+  ui.highlightCode();
+}
+
+function renderCode(panel, code, comments) {
+  if (code == null) {
+    panel.innerHTML = `<div class="empty-state">No content for this variant.</div>`;
+    return;
+  }
+  const commentLineSet = new Set();
+  for (const c of comments) {
+    const start = c.start_line ?? 0;
+    const end = c.end_line ?? start;
+    for (let l = start; l <= end; l++) commentLineSet.add(l);
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "code-wrap";
+  const lines = code.split("\n");
+  let highlighted;
+  try {
+    highlighted = hljs.highlight(code, { language: "python", ignoreIllegals: true }).value;
+  } catch {
+    highlighted = escapeHTML(code);
+  }
+  const highlightedLines = highlighted.split("\n");
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < lines.length; i++) {
+    const lineNumber = i + 1;
+    const row = document.createElement("div");
+    row.className = "code-line";
+    if (commentLineSet.has(lineNumber)) row.classList.add("has-comment");
+    row.innerHTML = `
+      <span class="lineno">${lineNumber}</span>
+      <span class="marker" title="${commentLineSet.has(lineNumber) ? "comment" : ""}"></span>
+      <span class="content hljs">${highlightedLines[i] ?? ""}</span>
+    `;
+    frag.appendChild(row);
+  }
+  wrap.appendChild(frag);
+  panel.appendChild(wrap);
+}
+
+function renderComments(panel, comments) {
+  if (!comments.length) {
+    panel.innerHTML = `<div class="empty-state">No comments on this record.</div>`;
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "comments-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th style="width:90px;">Type</th>
+        <th style="width:90px;">Status</th>
+        <th style="width:90px;">Lines</th>
+        <th>Comment</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector("tbody");
+  for (const c of comments) {
+    const tr = document.createElement("tr");
+    const type = c.type || "";
+    const status = c.status || "";
+    const lines =
+      c.start_line === c.end_line
+        ? `${c.start_line}`
+        : `${c.start_line}-${c.end_line}`;
+    tr.innerHTML = `
+      <td><span class="comment-type-chip ${escapeHTML(type)}">${escapeHTML(type)}</span></td>
+      <td>${escapeHTML(status)}</td>
+      <td>${escapeHTML(lines)}</td>
+      <td class="comment-text">${escapeHTML(c.comment ?? "")}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  panel.appendChild(table);
+}
+
+function renderRaw(panel, record) {
+  const pre = document.createElement("pre");
+  pre.style.padding = "12px 16px";
+  pre.style.fontSize = "11px";
+  pre.style.whiteSpace = "pre-wrap";
+  pre.style.wordBreak = "break-word";
+  pre.textContent = JSON.stringify(record, null, 2);
+  panel.appendChild(pre);
+}
+
+function escapeHTML(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+document.getElementById("search").addEventListener("input", (event) => {
+  state.search = event.target.value;
+  applyFilters();
+});
+
+loadSidebar();
+</script>
+</body>
+</html>
