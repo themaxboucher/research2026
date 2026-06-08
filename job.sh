@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=collect-smoke
-#SBATCH --time=01:00:00
+#SBATCH --job-name=mine-code-comments
+#SBATCH --time=10:00:00
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=4G
-#SBATCH --output=logs/collect-smoke-%j.out
-#SBATCH --error=logs/collect-smoke-%j.err
+#SBATCH --mem=16G
+#SBATCH --output=logs/mine-code-comments-%j.out
+#SBATCH --error=logs/mine-code-comments-%j.err
 
 set -euo pipefail
 
@@ -28,5 +28,7 @@ source .venv/bin/activate
 
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+
+export TQDM_DISABLE=1
 
 python main.py --collect --smoke-test --new-run
