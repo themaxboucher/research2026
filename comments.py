@@ -3,6 +3,30 @@ import io
 import tokenize
 
 
+def _node_signature(node: ast.AST) -> str:
+    if isinstance(node, ast.Module):
+        return "<module>"
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return f"def {node.name}({ast.unparse(node.args)})"
+    if isinstance(node, ast.ClassDef):
+        base_sources = ", ".join(ast.unparse(base) for base in node.bases)
+        return (
+            f"class {node.name}({base_sources})"
+            if base_sources
+            else f"class {node.name}"
+        )
+    return ""
+
+
+def _next_code_line(source_lines: list[str], after_line_no: int) -> str | None:
+    for line_index in range(after_line_no, len(source_lines)):
+        stripped_line = source_lines[line_index].strip()
+        if not stripped_line or stripped_line.startswith("#"):
+            continue
+        return stripped_line
+    return None
+
+
 def _collect_docstring_entries(file_content: str) -> list[dict]:
     tree = ast.parse(file_content)
     docstring_entries = []
@@ -29,6 +53,7 @@ def _collect_docstring_entries(file_content: str) -> list[dict]:
                 "type": "docstring",
                 "start_line": first_stmt.lineno,
                 "end_line": first_stmt.end_lineno,
+                "anchor": _node_signature(node),
             }
         )
 
@@ -38,7 +63,7 @@ def _collect_docstring_entries(file_content: str) -> list[dict]:
 def _collect_comment_entries(file_content: str) -> list[dict]:
     tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
     source_lines = file_content.splitlines(keepends=True)
-    raw_comment_tokens: list[tuple[int, str, bool]] = []
+    raw_comment_tokens: list[tuple[int, str, bool, str | None]] = []
 
     for tok in tokens:
         if tok.type != tokenize.COMMENT:
@@ -47,9 +72,11 @@ def _collect_comment_entries(file_content: str) -> list[dict]:
         row_idx = row - 1
         if row_idx < 0 or row_idx >= len(source_lines):
             continue
-        is_standalone = source_lines[row_idx][:col].strip() == ""
+        prefix = source_lines[row_idx][:col]
+        is_standalone = prefix.strip() == ""
+        inline_anchor = None if is_standalone else prefix.rstrip()
         comment_text = tok.string.rstrip("\r\n")
-        raw_comment_tokens.append((row, comment_text, is_standalone))
+        raw_comment_tokens.append((row, comment_text, is_standalone, inline_anchor))
 
     if not raw_comment_tokens:
         return []
@@ -57,7 +84,7 @@ def _collect_comment_entries(file_content: str) -> list[dict]:
     raw_comment_tokens.sort(key=lambda token: token[0])
 
     comment_entries: list[dict] = []
-    for line_no, text, is_standalone in raw_comment_tokens:
+    for line_no, text, is_standalone, inline_anchor in raw_comment_tokens:
         comment_type = "block" if is_standalone else "inline"
         previous_entry = comment_entries[-1] if comment_entries else None
 
@@ -78,8 +105,14 @@ def _collect_comment_entries(file_content: str) -> list[dict]:
                     "type": comment_type,
                     "start_line": line_no,
                     "end_line": line_no,
+                    "anchor": inline_anchor,
                 }
             )
+
+    plain_source_lines = file_content.splitlines()
+    for entry in comment_entries:
+        if entry["type"] == "block":
+            entry["anchor"] = _next_code_line(plain_source_lines, entry["end_line"])
 
     return comment_entries
 
@@ -102,21 +135,17 @@ def extract_comments(
     return all_entries
 
 
-def _comments_are_identical(first_comment: dict, second_comment: dict) -> bool:
-    return first_comment == second_comment
+def _is_same_comment(first_comment: dict, second_comment: dict) -> bool:
+    return first_comment.get("comment") == second_comment.get("comment")
 
 
-def _comments_share_position(first_comment: dict, second_comment: dict) -> bool:
+def _is_modified_comment(first_comment: dict, second_comment: dict) -> bool:
+    first_anchor = first_comment.get("anchor")
+    second_anchor = second_comment.get("anchor")
+    if first_anchor is None or second_anchor is None:
+        return False
     return (
-        first_comment["start_line"] == second_comment["start_line"]
-        and first_comment["end_line"] == second_comment["end_line"]
-        and first_comment["type"] == second_comment["type"]
-    )
-
-
-def _comments_share_text_and_type(first_comment: dict, second_comment: dict) -> bool:
-    return (
-        first_comment["comment"] == second_comment["comment"]
+        first_anchor == second_anchor
         and first_comment["type"] == second_comment["type"]
     )
 
@@ -129,20 +158,14 @@ def _find_status_for_new_comment(
     for old_index, old_comment in enumerate(old_comments):
         if old_index in matched_old_comment_indices:
             continue
-        if _comments_are_identical(new_comment, old_comment):
+        if _is_same_comment(new_comment, old_comment):
             return "unchanged", old_index
 
     for old_index, old_comment in enumerate(old_comments):
         if old_index in matched_old_comment_indices:
             continue
-        if _comments_share_position(new_comment, old_comment):
+        if _is_modified_comment(new_comment, old_comment):
             return "modified", old_index
-
-    for old_index, old_comment in enumerate(old_comments):
-        if old_index in matched_old_comment_indices:
-            continue
-        if _comments_share_text_and_type(new_comment, old_comment):
-            return "moved", old_index
 
     return "added", None
 

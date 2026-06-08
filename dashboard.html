@@ -284,6 +284,27 @@
     word-break: break-word;
     max-width: 0;
   }
+  table.comments-table .comment-anchor {
+    max-width: 0;
+  }
+  table.comments-table .anchor-code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: middle;
+  }
+  table.comments-table .anchor-empty {
+    color: var(--text-muted);
+  }
   .comment-type-chip {
     display: inline-block;
     padding: 1px 8px;
@@ -565,6 +586,7 @@ function renderComments(panel, comments) {
         <th style="width:90px;">Status</th>
         <th style="width:90px;">Lines</th>
         <th>Comment</th>
+        <th>Anchor</th>
       </tr>
     </thead>
     <tbody></tbody>
@@ -578,11 +600,16 @@ function renderComments(panel, comments) {
       c.start_line === c.end_line
         ? `${c.start_line}`
         : `${c.start_line}-${c.end_line}`;
+    const anchorText = c.anchor == null ? "" : c.anchor;
+    const anchorHTML = anchorText
+      ? `<code class="anchor-code">${escapeHTML(anchorText)}</code>`
+      : `<span class="anchor-empty">—</span>`;
     tr.innerHTML = `
       <td><span class="comment-type-chip ${escapeHTML(type)}">${escapeHTML(type)}</span></td>
       <td>${escapeHTML(status)}</td>
       <td>${escapeHTML(lines)}</td>
       <td class="comment-text">${escapeHTML(c.comment ?? "")}</td>
+      <td class="comment-anchor">${anchorHTML}</td>
     `;
     tbody.appendChild(tr);
   }
