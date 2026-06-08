@@ -61,7 +61,10 @@ def mine_repo(repo_url: str, branch: str, since: str) -> list[dict]:
 
             repo_files.append(
                 {
+                    "repo_name": commit.project_name,
+                    "commit_hash": commit.hash,
                     "filename": file.filename,
+                    "new_path": file.new_path,
                     "change_type": file.change_type.name,
                     "diff": file.diff,
                     "diff_parsed": file.diff_parsed,
