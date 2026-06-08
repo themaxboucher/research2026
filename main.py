@@ -1,4 +1,4 @@
-from collect import collect_dataset
+from collect import DEFAULT_MINING_WORKERS, collect_dataset
 from generate import generate_comments_for_dataset
 from report import generate_report
 from runs import resolve_run_directory
@@ -46,6 +46,12 @@ def parse_args():
         help="Limit files sent to the LLM for generation",
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_MINING_WORKERS,
+        help="Number of threads for concurrent repo cloning/mining",
+    )
+    parser.add_argument(
         "--smoke-test",
         action="store_true",
         help="Tiny run: sets all limits to small values for a quick end-to-end test",
@@ -78,6 +84,7 @@ def main():
             run_dir,
             max_repos=args.max_repos,
             repo_min_stars=args.repo_min_stars,
+            num_workers=args.workers,
         )
     if args.generate:
         generate_comments_for_dataset(run_dir, limit=args.max_generate)
