@@ -369,8 +369,9 @@ async function loadSidebar() {
   const response = await fetch("/records");
   state.sidebar = await response.json();
   const repoCount = new Set(state.sidebar.map(r => r.repo_name).filter(Boolean)).size;
+  const commentCount = state.sidebar.reduce((sum, r) => sum + (r.comment_count || 0), 0);
   document.getElementById("dataset-meta").textContent =
-    `${state.sidebar.length} records across ${repoCount} repos`;
+    `${state.sidebar.length} records across ${repoCount} repos · ${commentCount} comments`;
   initChangeTypeFilters();
   applyFilters();
 }

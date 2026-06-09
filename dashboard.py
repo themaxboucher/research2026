@@ -33,6 +33,7 @@ def _build_sidebar_payload(records: list[dict]) -> list[dict]:
         entry = {"index": index}
         for field in SIDEBAR_FIELDS:
             entry[field] = record.get(field)
+        entry["comment_count"] = len(record.get("comments") or [])
         sidebar_records.append(entry)
     return sidebar_records
 
