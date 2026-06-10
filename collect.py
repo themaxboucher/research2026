@@ -1,6 +1,11 @@
 from github import search_repos
 from comments import get_comments_from_file, strip_comments_from_file
-from storage import append_to_jsonl
+from storage import (
+    append_to_jsonl,
+    drop_trailing_records,
+    load_from_jsonl,
+    truncate_broken_tail,
+)
 from tqdm.auto import tqdm
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -20,8 +25,73 @@ REPO_LANGUAGE = "Python"
 CUTOFF_DATE = "2025-02-01"
 DEFAULT_MINING_WORKERS = 8
 
+DATA_FILENAME = "repo_files"
+REPOS_CACHE_FILENAME = "repos_cache"
+MINNED_REPOS_FILENAME = "mined_repos"
 
-def mine_repo(repo_url: str, branch: str, since: str) -> list[dict]:
+
+def _clean_previous_data(run_dir: Path) -> None:
+    truncate_broken_tail(run_dir, MINNED_REPOS_FILENAME)
+    removed_bytes = truncate_broken_tail(run_dir, DATA_FILENAME)
+    if removed_bytes:
+        logging.warning(
+            "Removed %d bytes of partially written data from %s.jsonl",
+            removed_bytes,
+            DATA_FILENAME,
+        )
+
+    mined_repo_names = _mined_repo_names(run_dir)
+    removed_records = drop_trailing_records(
+        run_dir,
+        DATA_FILENAME,
+        lambda record: record["repo_name"] not in mined_repo_names,
+    )
+    if removed_records:
+        logging.warning(
+            "Removed %d records from an interrupted repo. It will be re-mined",
+            removed_records,
+        )
+
+
+def _get_repos(repo_min_stars: int, max_repos: int | None, run_dir: Path) -> list[dict]:
+    repos_cache_path = run_dir / f"{REPOS_CACHE_FILENAME}.jsonl"
+    if repos_cache_path.exists():
+        logging.info("Loading cached repositories from %s", repos_cache_path)
+        return load_from_jsonl(run_dir, REPOS_CACHE_FILENAME)
+
+    logging.info("Searching for repositories with at least %d stars", repo_min_stars)
+    repos = search_repos(
+        language=REPO_LANGUAGE,
+        min_stars=repo_min_stars,
+        pushed_after=CUTOFF_DATE,
+        limit=max_repos,
+    )[:max_repos]
+
+    append_to_jsonl(repos, run_dir, REPOS_CACHE_FILENAME)
+
+    return repos
+
+
+def _mined_repo_names(run_dir: Path) -> set[str]:
+    mined_repos_path = run_dir / f"{MINNED_REPOS_FILENAME}.jsonl"
+    if not mined_repos_path.exists():
+        return set()
+    mined_repos = load_from_jsonl(run_dir, MINNED_REPOS_FILENAME)
+    return {repo["repo"] for repo in mined_repos}
+
+
+def _unmined_repos(repos: list[dict], run_dir: Path) -> list[dict]:
+    mined_repo_names = _mined_repo_names(run_dir)
+    return [repo for repo in repos if repo["full_name"] not in mined_repo_names]
+
+
+def _sort_repos_by_size(repos: list[dict]) -> list[dict]:
+    return sorted(repos, key=lambda repo: repo["size"])
+
+
+def _mine_repo(
+    repo_url: str, repo_full_name: str, branch: str, since: str
+) -> list[dict]:
     datetime_since = datetime.strptime(since, "%Y-%m-%d")
 
     repo = Repository(
@@ -64,7 +134,7 @@ def mine_repo(repo_url: str, branch: str, since: str) -> list[dict]:
 
             repo_files.append(
                 {
-                    "repo_name": commit.project_name,
+                    "repo_name": repo_full_name,
                     "commit_hash": commit.hash,
                     "filename": file.filename,
                     "new_path": file.new_path,
@@ -87,18 +157,26 @@ def mine_repo(repo_url: str, branch: str, since: str) -> list[dict]:
     return repo_files
 
 
-def _mine_and_persist_repo(
-    repo: dict, run_dir: Path, write_lock: Lock
-) -> int:
+def _mine_and_persist_repo(repo: dict, run_dir: Path, write_lock: Lock) -> int:
     repo_url = repo["html_url"]
     try:
-        repo_files = mine_repo(repo_url, repo["default_branch"], CUTOFF_DATE)
+        repo_files = _mine_repo(
+            repo_url, repo["full_name"], repo["default_branch"], CUTOFF_DATE
+        )
     except Exception as error:
+        append_to_jsonl(
+            {"repo": repo["full_name"], "error": str(error)},
+            run_dir,
+            MINNED_REPOS_FILENAME,
+        )
         logging.warning("Failed to mine %s: %s", repo_url, error)
         return 0
 
     with write_lock:
-        append_to_jsonl(repo_files, run_dir, "repo_files")
+        append_to_jsonl(repo_files, run_dir, DATA_FILENAME)
+        append_to_jsonl(
+            [{"repo": repo["full_name"], "error": None}], run_dir, MINNED_REPOS_FILENAME
+        )
     return len(repo_files)
 
 
@@ -108,16 +186,14 @@ def collect_dataset(
     repo_min_stars: int = 0,
     num_workers: int = DEFAULT_MINING_WORKERS,
 ) -> None:
+    _clean_previous_data(run_dir)
 
-    logging.info("Searching for repositories...")
-    repos = search_repos(
-        language=REPO_LANGUAGE,
-        min_stars=repo_min_stars,
-        pushed_after=CUTOFF_DATE,
-        limit=max_repos,
-    )
+    all_repos = _get_repos(repo_min_stars, max_repos, run_dir)
 
-    repos = repos[:max_repos]
+    repos_to_mine = _unmined_repos(all_repos, run_dir)
+
+    repos = _sort_repos_by_size(repos_to_mine)
+
     write_lock = Lock()
 
     logging.info("Mining %d repositories with %d workers", len(repos), num_workers)
