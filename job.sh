@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=mine-code-comments
-#SBATCH --time=10:00:00
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=16G
+#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=120G
 #SBATCH --output=logs/mine-code-comments-%j.out
 #SBATCH --error=logs/mine-code-comments-%j.err
 
@@ -31,4 +31,4 @@ python -m pip install -r requirements.txt
 
 export TQDM_DISABLE=1
 
-python main.py --collect --smoke-test --new-run
+python main.py --collect --new-run

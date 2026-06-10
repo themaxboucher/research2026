@@ -23,7 +23,7 @@ from datetime import datetime
 
 REPO_LANGUAGE = "Python"
 CUTOFF_DATE = "2025-12-02"
-DEFAULT_MINING_WORKERS = 8
+DEFAULT_MINING_WORKERS = 16
 
 DATA_FILENAME = "repo_files"
 REPOS_CACHE_FILENAME = "repos_cache"
