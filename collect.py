@@ -22,7 +22,7 @@ from datetime import datetime
 # Qwen...
 
 REPO_LANGUAGE = "Python"
-CUTOFF_DATE = "2025-02-01"
+CUTOFF_DATE = "2025-12-02"
 DEFAULT_MINING_WORKERS = 8
 
 DATA_FILENAME = "repo_files"
@@ -164,11 +164,12 @@ def _mine_and_persist_repo(repo: dict, run_dir: Path, write_lock: Lock) -> int:
             repo_url, repo["full_name"], repo["default_branch"], CUTOFF_DATE
         )
     except Exception as error:
-        append_to_jsonl(
-            {"repo": repo["full_name"], "error": str(error)},
-            run_dir,
-            MINNED_REPOS_FILENAME,
-        )
+        with write_lock:
+            append_to_jsonl(
+                [{"repo": repo["full_name"], "error": str(error)}],
+                run_dir,
+                MINNED_REPOS_FILENAME,
+            )
         logging.warning("Failed to mine %s: %s", repo_url, error)
         return 0
 
