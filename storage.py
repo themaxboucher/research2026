@@ -20,6 +20,18 @@ def append_to_jsonl(data: list[dict], directory: Path, filename: str) -> None:
     _write_jsonl(data, directory, filename, mode="a")
 
 
+def iter_from_jsonl(directory: Path, filename: str):
+    jsonl_path = directory / f"{filename}.jsonl"
+    if not jsonl_path.exists():
+        raise FileNotFoundError(f"No dataset file found: {jsonl_path}")
+
+    with jsonl_path.open("r", encoding="utf-8") as input_file:
+        for line in input_file:
+            stripped_line = line.strip()
+            if stripped_line:
+                yield json.loads(stripped_line)
+
+
 def load_from_jsonl(directory: Path, filename: str) -> list[dict]:
     jsonl_path = directory / f"{filename}.jsonl"
     json_path = directory / f"{filename}.json"

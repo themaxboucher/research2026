@@ -18,6 +18,12 @@ def parse_args():
         "--report", action="store_true", help="Build dataset statistics and graphs"
     )
     parser.add_argument(
+        "--report-dataset",
+        choices=["files_generated", "repo_files"],
+        default="files_generated",
+        help="Which dataset the report reads (default: the post-generation dataset)",
+    )
+    parser.add_argument(
         "--new-run",
         action="store_true",
         help="Start a fresh timestamped run directory instead of using the latest",
@@ -89,7 +95,7 @@ def main():
     if args.generate:
         generate_comments_for_dataset(run_dir, limit=args.max_generate)
     if args.report:
-        generate_report(run_dir)
+        generate_report(run_dir, args.report_dataset)
 
 
 if __name__ == "__main__":

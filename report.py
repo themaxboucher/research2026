@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from pathlib import Path
 from typing import NamedTuple
 
@@ -10,11 +11,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from runs import require_latest_run_directory
-from storage import load_from_jsonl
+from storage import iter_from_jsonl
 
-GENERATED_DATASET_FILENAME = "files_generated"
 ORIGINAL_SOURCE_LABEL = "original"
+ALL_REPOS_LABEL = "ALL"
 
 HISTOGRAM_BIN_COUNT = 30
 SOURCE_COLOR_PALETTE = [
@@ -34,8 +34,8 @@ class SourceVariant(NamedTuple):
     comments: list[dict]
 
 
-def _repo_identifier(source_file: dict) -> str:
-    return f"{source_file['repo_owner']}/{source_file['repo_name']}"
+def _source_file_path(source_file: dict) -> str:
+    return source_file.get("new_path") or source_file["filename"]
 
 
 def _short_source_label(source: str) -> str:
@@ -59,7 +59,7 @@ def compute_content_metrics(content: str, comments: list[dict]) -> dict:
 
 
 def _iter_source_variants(source_file: dict):
-    original_content = source_file.get("content")
+    original_content = source_file.get("source_code")
     if original_content:
         yield SourceVariant(
             ORIGINAL_SOURCE_LABEL,
@@ -77,45 +77,42 @@ def _iter_source_variants(source_file: dict):
             )
 
 
-def build_file_metrics_dataframe(generated_files: list[dict]) -> pd.DataFrame:
+def _present_comments(comments: list[dict]) -> list[dict]:
+    return [comment for comment in comments if comment.get("status") != "removed"]
+
+
+def _count_comment_types(
+    repo: str, source_label: str, comments: list[dict]
+) -> Counter:
+    type_counts: Counter = Counter()
+    for comment in comments:
+        type_counts[(repo, source_label, comment["type"])] += 1
+    return type_counts
+
+
+def collect_metrics(source_files) -> tuple[pd.DataFrame, Counter]:
     metric_rows = []
-    for source_file in generated_files:
-        repo = _repo_identifier(source_file)
+    comment_type_counts: Counter = Counter()
+
+    for source_file in source_files:
+        repo = source_file["repo_name"]
+        filepath = _source_file_path(source_file)
         for variant in _iter_source_variants(source_file):
-            metrics = compute_content_metrics(variant.content, variant.comments)
+            present_comments = _present_comments(variant.comments)
+            metrics = compute_content_metrics(variant.content, present_comments)
             metric_rows.append(
                 {
                     "repo": repo,
-                    "filepath": source_file["filepath"],
+                    "filepath": filepath,
                     "source": variant.source_label,
                     **metrics,
                 }
             )
-    return pd.DataFrame(metric_rows)
+            comment_type_counts.update(
+                _count_comment_types(repo, variant.source_label, present_comments)
+            )
 
-
-def _build_comment_row(repo: str, source_label: str, comment: dict) -> dict:
-    line_span = comment["end_line"] - comment["start_line"] + 1
-    return {
-        "repo": repo,
-        "source": source_label,
-        "comment_type": comment["type"],
-        "character_length": len(comment["comment"]),
-        "line_span": line_span,
-        "is_multiline": line_span > 1,
-    }
-
-
-def build_comments_dataframe(generated_files: list[dict]) -> pd.DataFrame:
-    comment_rows = []
-    for source_file in generated_files:
-        repo = _repo_identifier(source_file)
-        for variant in _iter_source_variants(source_file):
-            for comment in variant.comments:
-                comment_rows.append(
-                    _build_comment_row(repo, variant.source_label, comment)
-                )
-    return pd.DataFrame(comment_rows)
+    return pd.DataFrame(metric_rows), comment_type_counts
 
 
 def _ordered_sources(file_metrics: pd.DataFrame) -> list[str]:
@@ -136,47 +133,84 @@ def _source_colors(sources: list[str]) -> dict[str, str]:
     }
 
 
+def _summary_row(
+    repo: str,
+    source: str,
+    files: pd.DataFrame,
+    inline_count: int,
+    block_count: int,
+    docstring_count: int,
+) -> dict:
+    return {
+        "repo": repo,
+        "source": source,
+        "total_files": int(len(files)),
+        "total_loc": int(files["loc"].sum()),
+        "total_comments": int(files["comments"].sum()),
+        "inline_comments": inline_count,
+        "block_comments": block_count,
+        "docstring_comments": docstring_count,
+        "files_without_comments": int((files["comments"] == 0).sum()),
+        "mean_comments_per_file": float(files["comments"].mean()),
+        "mean_comments_per_loc": float(files["comments_per_loc"].mean()),
+        "median_comments_per_loc": float(files["comments_per_loc"].median()),
+        "mean_avg_comment_length": float(files["avg_comment_length"].mean()),
+    }
+
+
+def _per_repo_summary_rows(
+    file_metrics: pd.DataFrame, comment_type_counts: Counter
+) -> list[dict]:
+    rows = []
+    for (repo, source), files in file_metrics.groupby(["repo", "source"]):
+        rows.append(
+            _summary_row(
+                repo,
+                source,
+                files,
+                comment_type_counts.get((repo, source, "inline"), 0),
+                comment_type_counts.get((repo, source, "block"), 0),
+                comment_type_counts.get((repo, source, "docstring"), 0),
+            )
+        )
+    return rows
+
+
+def _total_type_count(
+    comment_type_counts: Counter, source: str, comment_type: str
+) -> int:
+    return sum(
+        count
+        for (_, counted_source, counted_type), count in comment_type_counts.items()
+        if counted_source == source and counted_type == comment_type
+    )
+
+
+def _all_repos_summary_rows(
+    file_metrics: pd.DataFrame, comment_type_counts: Counter
+) -> list[dict]:
+    rows = []
+    for source in _ordered_sources(file_metrics):
+        files = file_metrics[file_metrics["source"] == source]
+        rows.append(
+            _summary_row(
+                ALL_REPOS_LABEL,
+                source,
+                files,
+                _total_type_count(comment_type_counts, source, "inline"),
+                _total_type_count(comment_type_counts, source, "block"),
+                _total_type_count(comment_type_counts, source, "docstring"),
+            )
+        )
+    return rows
+
+
 def compute_per_repo_summary(
-    file_metrics: pd.DataFrame, comments: pd.DataFrame
+    file_metrics: pd.DataFrame, comment_type_counts: Counter
 ) -> pd.DataFrame:
-    if not comments.empty:
-        type_counts_by_group = (
-            comments.groupby(["repo", "source", "comment_type"])
-            .size()
-            .unstack(fill_value=0)
-        )
-    else:
-        type_counts_by_group = pd.DataFrame()
-
-    def _type_count(repo: str, source: str, comment_type: str) -> int:
-        if comment_type not in type_counts_by_group.columns:
-            return 0
-        if (repo, source) not in type_counts_by_group.index:
-            return 0
-        return int(type_counts_by_group.at[(repo, source), comment_type])
-
-    summary_rows = []
-    for (repo, source), group in file_metrics.groupby(["repo", "source"]):
-        summary_rows.append(
-            {
-                "repo": repo,
-                "source": source,
-                "total_files": int(len(group)),
-                "total_loc": int(group["loc"].sum()),
-                "total_comments": int(group["comments"].sum()),
-                "inline_comments": _type_count(repo, source, "inline"),
-                "block_comments": _type_count(repo, source, "block"),
-                "docstring_comments": _type_count(repo, source, "docstring"),
-                "files_without_comments": int((group["comments"] == 0).sum()),
-                "mean_comments_per_file": float(group["comments"].mean()),
-                "mean_comments_per_loc": float(group["comments_per_loc"].mean()),
-                "median_comments_per_loc": float(group["comments_per_loc"].median()),
-                "mean_avg_comment_length": float(group["avg_comment_length"].mean()),
-            }
-        )
-
-    summary = pd.DataFrame(summary_rows)
-    return summary.sort_values(["repo", "source"]).reset_index(drop=True)
+    all_repos_rows = _all_repos_summary_rows(file_metrics, comment_type_counts)
+    per_repo_rows = _per_repo_summary_rows(file_metrics, comment_type_counts)
+    return pd.DataFrame(all_repos_rows + per_repo_rows)
 
 
 def _save_figure(figure, reports_dir: Path, output_filename: str) -> None:
@@ -223,30 +257,6 @@ def plot_distribution_by_source(
     _save_figure(figure, reports_dir, output_filename)
 
 
-def plot_metric_by_source(
-    per_source_summary: pd.DataFrame,
-    metric_column: str,
-    sources: list[str],
-    source_colors: dict[str, str],
-    reports_dir: Path,
-    *,
-    title: str,
-    y_axis_label: str,
-    output_filename: str,
-) -> None:
-    labels = [_short_source_label(source) for source in sources]
-    heights = [per_source_summary.loc[source, metric_column] for source in sources]
-    colors = [source_colors[source] for source in sources]
-
-    figure, axes = plt.subplots(figsize=(9, 5))
-    bars = axes.bar(labels, heights, color=colors)
-    axes.set_title(title)
-    axes.set_ylabel(y_axis_label)
-    axes.bar_label(bars, fmt="%.3g", padding=3)
-    figure.autofmt_xdate(rotation=30)
-    _save_figure(figure, reports_dir, output_filename)
-
-
 def _render_all_plots(
     file_metrics: pd.DataFrame,
     sources: list[str],
@@ -281,22 +291,21 @@ def _write_summary_csv(summary: pd.DataFrame, reports_dir: Path) -> None:
     summary.to_csv(reports_dir / "summary.csv", index=False)
 
 
-def generate_report(run_dir: Path) -> None:
-    generated_files = load_from_jsonl(run_dir, GENERATED_DATASET_FILENAME)
-    file_metrics = build_file_metrics_dataframe(generated_files)
+def generate_report(run_dir: Path, dataset_filename: str) -> None:
+    records = iter_from_jsonl(run_dir, dataset_filename)
+    file_metrics, comment_type_counts = collect_metrics(records)
 
     if file_metrics.empty:
         logging.warning("No files with content found; nothing to report.")
         return
 
-    comments = build_comments_dataframe(generated_files)
     sources = _ordered_sources(file_metrics)
     source_colors = _source_colors(sources)
 
     reports_dir = run_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    summary = compute_per_repo_summary(file_metrics, comments)
+    summary = compute_per_repo_summary(file_metrics, comment_type_counts)
 
     _write_summary_csv(summary, reports_dir)
     _render_all_plots(file_metrics, sources, source_colors, reports_dir)
@@ -306,11 +315,3 @@ def generate_report(run_dir: Path) -> None:
         reports_dir,
         ", ".join(sources),
     )
-
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-    generate_report(require_latest_run_directory())
