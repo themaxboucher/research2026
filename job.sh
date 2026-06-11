@@ -31,4 +31,4 @@ python -m pip install -r requirements.txt
 
 export TQDM_DISABLE=1
 
-python main.py --collect --new-run
+python main.py --collect
