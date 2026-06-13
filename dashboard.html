@@ -317,6 +317,54 @@
   .comment-type-chip.block { background: #fff8c5; color: #9a6700; }
   .comment-type-chip.docstring { background: #dafbe1; color: #1a7f37; }
 
+  /* generations */
+  .gen-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: #6639ba;
+    background: #fbefff;
+    border-radius: 10px;
+    padding: 1px 6px;
+    flex-shrink: 0;
+  }
+  .filter-row label.gen-filter.active {
+    background: #6639ba;
+    border-color: #6639ba;
+    color: white;
+  }
+  .gen-view-bar {
+    display: flex;
+    gap: 4px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+  .gen-view-bar button {
+    font-size: 11px;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    cursor: pointer;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .gen-view-bar button.active {
+    background: #6639ba;
+    border-color: #6639ba;
+    color: white;
+  }
+  .gen-view-panel { flex: 1; overflow: auto; }
+  .gen-edit-block {
+    margin: 12px 16px;
+    padding: 10px 12px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
   /* diff2html tweaks */
   .d2h-wrapper { padding: 8px 16px; }
 </style>
@@ -355,33 +403,49 @@ const TABS = [
   { id: "raw",    label: "Raw JSON" },
 ];
 
+const PAGE_SIZE = 200;
+
 const state = {
-  sidebar: [],
-  filteredIndices: [],
+  rows: [],
+  total: 0,
+  nextOffset: 0,
+  loading: false,
+  changeTypes: [],
   search: "",
   activeChangeTypes: new Set(),
+  genOnly: false,
   selectedIndex: null,
   currentRecord: null,
   activeTab: "diff",
+  genView: "gendiff",
 };
 
-async function loadSidebar() {
-  const response = await fetch("/records");
-  state.sidebar = await response.json();
-  const repoCount = new Set(state.sidebar.map(r => r.repo_name).filter(Boolean)).size;
-  const commentCount = state.sidebar.reduce((sum, r) => sum + (r.comment_count || 0), 0);
+async function loadMeta() {
+  const response = await fetch("/meta");
+  const meta = await response.json();
   document.getElementById("dataset-meta").textContent =
-    `${state.sidebar.length} records across ${repoCount} repos · ${commentCount} comments`;
+    `${meta.count} records across ${meta.repo_count} repos · ${meta.comment_count} comments`;
+  state.changeTypes = meta.change_types || [];
   initChangeTypeFilters();
-  applyFilters();
+  await reloadRecords();
 }
 
 function initChangeTypeFilters() {
-  const types = Array.from(new Set(state.sidebar.map(r => r.change_type).filter(Boolean))).sort();
-  state.activeChangeTypes = new Set(types);
+  state.activeChangeTypes = new Set(state.changeTypes);
   const container = document.getElementById("change-type-filters");
   container.innerHTML = "";
-  for (const type of types) {
+
+  const genLabel = document.createElement("label");
+  genLabel.className = "gen-filter";
+  genLabel.textContent = "⚡ generated only";
+  genLabel.addEventListener("click", () => {
+    state.genOnly = !state.genOnly;
+    genLabel.classList.toggle("active", state.genOnly);
+    reloadRecords();
+  });
+  container.appendChild(genLabel);
+
+  for (const type of state.changeTypes) {
     const label = document.createElement("label");
     label.className = "active";
     label.textContent = type;
@@ -394,30 +458,59 @@ function initChangeTypeFilters() {
         state.activeChangeTypes.add(type);
         label.classList.add("active");
       }
-      applyFilters();
+      reloadRecords();
     });
     container.appendChild(label);
   }
 }
 
-function applyFilters() {
-  const query = state.search.trim().toLowerCase();
-  state.filteredIndices = state.sidebar
-    .filter(r => state.activeChangeTypes.has(r.change_type))
-    .filter(r => {
-      if (!query) return true;
-      const hay = [r.filename, r.new_path, r.repo_name].filter(Boolean).join(" ").toLowerCase();
-      return hay.includes(query);
-    })
-    .map(r => r.index);
-  renderSidebar();
+function recordsQuery(offset) {
+  const params = new URLSearchParams();
+  params.set("offset", String(offset));
+  params.set("limit", String(PAGE_SIZE));
+  const query = state.search.trim();
+  if (query) params.set("q", query);
+  if (state.activeChangeTypes.size !== state.changeTypes.length) {
+    params.set("types", Array.from(state.activeChangeTypes).join(","));
+  }
+  if (state.genOnly) params.set("gen", "1");
+  return params.toString();
 }
 
-function renderSidebar() {
+async function reloadRecords() {
+  state.rows = [];
+  state.total = 0;
+  state.nextOffset = 0;
+  document.getElementById("records-list").innerHTML = "";
+  await loadMoreRecords();
+}
+
+async function loadMoreRecords() {
+  if (state.loading) return;
+  if (state.rows.length && state.rows.length >= state.total) return;
+  state.loading = true;
+  const response = await fetch(`/records?${recordsQuery(state.nextOffset)}`);
+  const data = await response.json();
+  state.total = data.total;
+  state.nextOffset += data.rows.length;
+  appendRows(data.rows);
+  updateSidebarCount();
+  state.loading = false;
+  maybeLoadMore();
+}
+
+function maybeLoadMore() {
   const list = document.getElementById("records-list");
-  list.innerHTML = "";
-  for (const idx of state.filteredIndices) {
-    const r = state.sidebar[idx];
+  const hasMore = state.rows.length < state.total;
+  const notScrollable = list.scrollHeight <= list.clientHeight;
+  if (hasMore && notScrollable) loadMoreRecords();
+}
+
+function appendRows(rows) {
+  const list = document.getElementById("records-list");
+  for (const r of rows) {
+    state.rows.push(r);
+    const idx = r.index;
     const li = document.createElement("li");
     li.dataset.index = String(idx);
     if (state.selectedIndex === idx) li.classList.add("selected");
@@ -435,6 +528,13 @@ function renderSidebar() {
     nloc.className = "nloc";
     nloc.textContent = r.nloc != null ? `${r.nloc} loc` : "";
     row1.append(chip, name, nloc);
+    if (r.generation_count != null) {
+      const gen = document.createElement("span");
+      gen.className = "gen-badge";
+      gen.textContent = `⚡${r.generation_count}`;
+      gen.title = `${r.generation_count} generation(s)`;
+      row1.appendChild(gen);
+    }
 
     const row2 = document.createElement("div");
     row2.className = "row2";
@@ -447,18 +547,41 @@ function renderSidebar() {
     li.addEventListener("click", () => selectRecord(idx));
     list.appendChild(li);
   }
+}
+
+function markSelection() {
+  for (const li of document.querySelectorAll("#records-list li")) {
+    li.classList.toggle("selected", Number(li.dataset.index) === state.selectedIndex);
+  }
+}
+
+function updateSidebarCount() {
   document.getElementById("sidebar-count").textContent =
-    `${state.filteredIndices.length} of ${state.sidebar.length} shown`;
+    `${state.rows.length} of ${state.total} matching`;
 }
 
 async function selectRecord(index) {
   state.selectedIndex = index;
-  renderSidebar();
+  markSelection();
   const response = await fetch(`/records/${index}`);
   state.currentRecord = await response.json();
+  const genCount = (state.currentRecord.generations || []).length;
+  if (state.activeTab.startsWith("gen:") && Number(state.activeTab.slice(4)) >= genCount) {
+    state.activeTab = "diff";
+  }
   renderDetailHeader();
   renderTabs();
   renderActiveTab();
+}
+
+function generationTabs(record) {
+  const seen = {};
+  return (record.generations || []).map((g, i) => {
+    const short = (g.model || `gen ${i + 1}`).split("/").pop();
+    seen[short] = (seen[short] || 0) + 1;
+    const label = seen[short] > 1 ? `${short} #${seen[short]}` : short;
+    return { id: `gen:${i}`, label: `⚡ ${label}` };
+  });
 }
 
 function renderDetailHeader() {
@@ -486,7 +609,8 @@ function renderTabs() {
   const tabs = document.getElementById("tabs");
   tabs.style.display = "flex";
   tabs.innerHTML = "";
-  for (const tab of TABS) {
+  const allTabs = TABS.concat(generationTabs(state.currentRecord || {}));
+  for (const tab of allTabs) {
     const button = document.createElement("button");
     button.textContent = tab.label;
     if (tab.id === state.activeTab) button.classList.add("active");
@@ -505,6 +629,11 @@ function renderActiveTab() {
   const r = state.currentRecord;
   if (!r) return;
 
+  if (state.activeTab.startsWith("gen:")) {
+    const generation = (r.generations || [])[Number(state.activeTab.slice(4))];
+    if (generation) return renderGeneration(panel, generation);
+  }
+
   switch (state.activeTab) {
     case "diff":     return renderDiff(panel, r);
     case "cur":      return renderCode(panel, r.source_code, r.comments || []);
@@ -513,6 +642,72 @@ function renderActiveTab() {
     case "prevnc":   return renderCode(panel, r.previous_source_code_without_comments, []);
     case "comments": return renderComments(panel, r.comments || []);
     case "raw":      return renderRaw(panel, r);
+  }
+}
+
+const GEN_VIEWS = [
+  { id: "gendiff",     label: "Diff vs human file" },
+  { id: "gencontent",  label: "Generated content" },
+  { id: "gencomments", label: "Generated comments" },
+  { id: "genedits",    label: "Raw edits" },
+];
+
+function renderGeneration(panel, generation) {
+  const bar = document.createElement("div");
+  bar.className = "gen-view-bar";
+  for (const view of GEN_VIEWS) {
+    const button = document.createElement("button");
+    button.textContent = view.label;
+    if (view.id === state.genView) button.classList.add("active");
+    button.addEventListener("click", () => {
+      state.genView = view.id;
+      renderActiveTab();
+    });
+    bar.appendChild(button);
+  }
+  panel.appendChild(bar);
+
+  const sub = document.createElement("div");
+  sub.className = "gen-view-panel";
+  panel.appendChild(sub);
+
+  switch (state.genView) {
+    case "gendiff": {
+      if (!generation.diff_vs_source) {
+        sub.innerHTML = `<div class="empty-state">Generation is identical to the human file.</div>`;
+        return;
+      }
+      const r = state.currentRecord;
+      const fakePath = r.new_path || r.filename || "file.py";
+      const unified = `diff --git a/${fakePath} b/${fakePath}\n` + generation.diff_vs_source;
+      const ui = new Diff2HtmlUI(sub, unified, {
+        drawFileList: false,
+        matching: "lines",
+        outputFormat: "side-by-side",
+        highlight: true,
+      });
+      ui.draw();
+      ui.highlightCode();
+      return;
+    }
+    case "gencontent":
+      return renderCode(sub, generation.generated_content, generation.generated_comments || []);
+    case "gencomments":
+      return renderComments(sub, generation.generated_comments || []);
+    case "genedits": {
+      const edits = generation.generated_edits || [];
+      if (!edits.length) {
+        sub.innerHTML = `<div class="empty-state">No edit excerpts recorded.</div>`;
+        return;
+      }
+      for (const excerpt of edits) {
+        const pre = document.createElement("pre");
+        pre.className = "gen-edit-block";
+        pre.textContent = excerpt;
+        sub.appendChild(pre);
+      }
+      return;
+    }
   }
 }
 
@@ -636,12 +831,21 @@ function escapeHTML(value) {
     .replace(/"/g, "&quot;");
 }
 
+let searchTimer = null;
 document.getElementById("search").addEventListener("input", (event) => {
   state.search = event.target.value;
-  applyFilters();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(reloadRecords, 200);
 });
 
-loadSidebar();
+document.getElementById("records-list").addEventListener("scroll", (event) => {
+  const list = event.target;
+  if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) {
+    loadMoreRecords();
+  }
+});
+
+loadMeta();
 </script>
 </body>
 </html>
