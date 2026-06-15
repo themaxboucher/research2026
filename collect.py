@@ -8,6 +8,9 @@ from storage import (
 )
 from tqdm.auto import tqdm
 import logging
+import os
+import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
@@ -89,19 +92,19 @@ def _sort_repos_by_size(repos: list[dict]) -> list[dict]:
     return sorted(repos, key=lambda repo: repo["size"])
 
 
-def _mine_repo(
-    repo_url: str, repo_full_name: str, branch: str, since: str
-) -> list[dict]:
-    datetime_since = datetime.strptime(since, "%Y-%m-%d")
-
-    repo = Repository(
-        repo_url,
-        since=datetime_since,
-        only_in_branch=branch,
-        only_no_merge=True,
-        only_modifications_with_file_types=[".py"],
+def _blobless_clone(repo_url: str, target_dir: str) -> None:
+    result = subprocess.run(
+        ["git", "clone", "--filter=blob:none", "--quiet", repo_url, target_dir],
+        capture_output=True,
+        text=True,
     )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git clone failed for {repo_url}: {result.stderr.strip()}"
+        )
 
+
+def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
     repo_files = []
 
     for commit in repo.traverse_commits():
@@ -155,6 +158,26 @@ def _mine_repo(
             )
 
     return repo_files
+
+
+def _mine_repo(
+    repo_url: str, repo_full_name: str, branch: str, since: str
+) -> list[dict]:
+    datetime_since = datetime.strptime(since, "%Y-%m-%d")
+
+    with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as clone_parent:
+        clone_dir = str(Path(clone_parent) / "repo")
+        _blobless_clone(repo_url, clone_dir)
+
+        repo = Repository(
+            clone_dir,
+            since=datetime_since,
+            only_in_branch=branch,
+            only_no_merge=True,
+            only_modifications_with_file_types=[".py"],
+        )
+
+        return _collect_repo_files(repo, repo_full_name)
 
 
 def _mine_and_persist_repo(repo: dict, run_dir: Path, write_lock: Lock) -> int:
