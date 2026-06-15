@@ -205,6 +205,113 @@ def get_comments_from_file(file_content: str, previous_file_content: str) -> lis
     return _annotate_comments(new_comments, old_comments)
 
 
+def _line_indentation(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
+
+
+def _graft_inline_comment(
+    target_lines: list[str], comment_entry: dict, claimed_line_indices: set[int]
+) -> None:
+    code_anchor = comment_entry["anchor"]
+    for line_index, line in enumerate(target_lines):
+        if line_index in claimed_line_indices:
+            continue
+        if line.rstrip() != code_anchor:
+            continue
+        target_lines[line_index] = code_anchor + "  " + comment_entry["comment"]
+        claimed_line_indices.add(line_index)
+        return
+
+
+def _block_comment_insertion(
+    target_lines: list[str], comment_entry: dict, claimed_line_indices: set[int]
+) -> tuple[int, list[str]] | None:
+    code_anchor = comment_entry["anchor"]
+    if code_anchor is None:
+        return None
+    for line_index, line in enumerate(target_lines):
+        if line_index in claimed_line_indices:
+            continue
+        if line.strip() != code_anchor:
+            continue
+        claimed_line_indices.add(line_index)
+        indentation = _line_indentation(line)
+        comment_lines = [
+            indentation + comment_line
+            for comment_line in comment_entry["comment"].splitlines()
+        ]
+        return line_index, comment_lines
+    return None
+
+
+def _docstring_insert_points(source: str) -> dict[str, list[tuple[int, str]]]:
+    tree = ast.parse(source)
+    source_lines = source.splitlines()
+    insert_points: dict[str, list[tuple[int, str]]] = {}
+
+    for node in ast.walk(tree):
+        if not isinstance(
+            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            continue
+        if not node.body:
+            continue
+        first_statement_line_index = node.body[0].lineno - 1
+        indentation = _line_indentation(source_lines[first_statement_line_index])
+        insert_points.setdefault(_node_signature(node), []).append(
+            (first_statement_line_index, indentation)
+        )
+
+    return insert_points
+
+
+def _docstring_insertion(
+    insert_points: dict[str, list[tuple[int, str]]], comment_entry: dict
+) -> tuple[int, list[str]] | None:
+    available_points = insert_points.get(comment_entry["anchor"])
+    if not available_points:
+        return None
+    line_index, indentation = available_points.pop(0)
+    docstring_lines = comment_entry["comment"].splitlines()
+    rendered_lines = [indentation + docstring_lines[0]] + docstring_lines[1:]
+    return line_index, rendered_lines
+
+
+def graft_comments_onto_code(
+    code_without_comments: str, previous_file_content: str | None
+) -> str:
+    previous_comments = extract_comments(previous_file_content)
+    if not previous_comments:
+        return code_without_comments
+
+    target_lines = code_without_comments.splitlines()
+    docstring_points = _docstring_insert_points(code_without_comments)
+    claimed_inline_line_indices: set[int] = set()
+    claimed_block_line_indices: set[int] = set()
+    pending_insertions: list[tuple[int, list[str]]] = []
+
+    for comment_entry in previous_comments:
+        if comment_entry["type"] == "inline":
+            _graft_inline_comment(
+                target_lines, comment_entry, claimed_inline_line_indices
+            )
+        elif comment_entry["type"] == "block":
+            insertion = _block_comment_insertion(
+                target_lines, comment_entry, claimed_block_line_indices
+            )
+            if insertion:
+                pending_insertions.append(insertion)
+        else:
+            insertion = _docstring_insertion(docstring_points, comment_entry)
+            if insertion:
+                pending_insertions.append(insertion)
+
+    for line_index, lines_to_insert in sorted(pending_insertions, reverse=True):
+        target_lines[line_index:line_index] = lines_to_insert
+
+    return "\n".join(target_lines) + "\n"
+
+
 def _strip_docstring_lines(
     source_lines: list[str], file_content: str
 ) -> tuple[list[str], set[int]]:

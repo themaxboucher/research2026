@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "accelerate>=1.13.0",
     "matplotlib>=3.10.9",
+    "openrouter>=0.9.2",
     "pandas>=3.0.3",
     "pydriller>=2.9",
     "python-dotenv>=1.2.2",

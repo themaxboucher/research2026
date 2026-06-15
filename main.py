@@ -75,7 +75,7 @@ def parse_args():
 
     if args.smoke_test:
         args.max_repos = 10
-        args.max_generate = 3
+        args.max_generate = 10
 
     return args
 

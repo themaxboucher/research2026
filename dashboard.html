@@ -697,13 +697,14 @@ function renderGeneration(panel, generation) {
     case "genedits": {
       const edits = generation.generated_edits || [];
       if (!edits.length) {
-        sub.innerHTML = `<div class="empty-state">No edit excerpts recorded.</div>`;
+        sub.innerHTML = `<div class="empty-state">No edit blocks recorded.</div>`;
         return;
       }
-      for (const excerpt of edits) {
+      for (const edit of edits) {
         const pre = document.createElement("pre");
         pre.className = "gen-edit-block";
-        pre.textContent = excerpt;
+        pre.textContent =
+          "<<<<<<< SEARCH\n" + edit.search + "\n=======\n" + edit.replace + "\n>>>>>>> REPLACE";
         sub.appendChild(pre);
       }
       return;
