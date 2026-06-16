@@ -128,6 +128,8 @@ def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
             if is_rename_change:
                 continue
 
+            error = None
+
             try:
                 source_code_without_comments = strip_comments_from_file(
                     file.source_code
@@ -138,13 +140,16 @@ def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
                 comments = get_comments_from_file(
                     file.source_code, file.source_code_before
                 )
-            except (tokenize.TokenError, IndentationError, SyntaxError) as error:
+            except (tokenize.TokenError, IndentationError, SyntaxError) as e:
                 logging.warning(
-                    "Skipping file %s: tokenization failed: %s",
+                    "Could not process file %s: tokenization failed: %s",
                     file.filename,
-                    error,
+                    e,
                 )
-                continue
+                source_code_without_comments = None
+                previous_source_code_without_comments = None
+                comments = None
+                error = str(e)
 
             repo_files.append(
                 {
@@ -165,6 +170,7 @@ def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
                     "nloc": file.nloc,
                     "complexity": file.complexity,
                     "token_count": file.token_count,
+                    "error": error,
                 }
             )
 
