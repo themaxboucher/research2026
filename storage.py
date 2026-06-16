@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 
@@ -100,6 +101,16 @@ def drop_trailing_records(
             removed_records += 1
         jsonl_file.truncate(end)
     return removed_records
+
+
+def merge_jsonl_shards(directory: Path, filename: str) -> int:
+    shard_paths = sorted(directory.glob(f"{filename}.*.jsonl"))
+    output_path = directory / f"{filename}.jsonl"
+    with output_path.open("w", encoding="utf-8") as output_file:
+        for shard_path in shard_paths:
+            with shard_path.open("r", encoding="utf-8") as shard_file:
+                shutil.copyfileobj(shard_file, output_file)
+    return len(shard_paths)
 
 
 def load_from_jsonl(directory: Path, filename: str) -> list[dict]:

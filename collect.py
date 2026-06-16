@@ -4,10 +4,12 @@ from storage import (
     append_to_jsonl,
     drop_trailing_records,
     load_from_jsonl,
+    merge_jsonl_shards,
     truncate_broken_tail,
 )
 from tqdm.auto import tqdm
 import logging
+import math
 import os
 import subprocess
 import tempfile
@@ -33,20 +35,31 @@ REPOS_CACHE_FILENAME = "repos_cache"
 MINNED_REPOS_FILENAME = "mined_repos"
 
 
-def _clean_previous_data(run_dir: Path) -> None:
-    truncate_broken_tail(run_dir, MINNED_REPOS_FILENAME)
-    removed_bytes = truncate_broken_tail(run_dir, DATA_FILENAME)
+def _get_shard_filenames(task_id: int, num_tasks: int) -> tuple[str, str]:
+    digit_width = max(len(str(num_tasks - 1)), 1)
+    formatted_suffix = f"{task_id:0{digit_width}d}"
+    return (
+        f"{DATA_FILENAME}.{formatted_suffix}",
+        f"{MINNED_REPOS_FILENAME}.{formatted_suffix}",
+    )
+
+
+def _clean_previous_data(
+    run_dir: Path, data_filename: str, mined_filename: str
+) -> None:
+    truncate_broken_tail(run_dir, mined_filename)
+    removed_bytes = truncate_broken_tail(run_dir, data_filename)
     if removed_bytes:
         logging.warning(
             "Removed %d bytes of partially written data from %s.jsonl",
             removed_bytes,
-            DATA_FILENAME,
+            data_filename,
         )
 
-    mined_repo_names = _mined_repo_names(run_dir)
+    mined_repo_names = _mined_repo_names(run_dir, mined_filename)
     removed_records = drop_trailing_records(
         run_dir,
-        DATA_FILENAME,
+        data_filename,
         lambda record: record["repo_name"] not in mined_repo_names,
     )
     if removed_records:
@@ -75,16 +88,16 @@ def _get_repos(repo_min_stars: int, max_repos: int | None, run_dir: Path) -> lis
     return repos
 
 
-def _mined_repo_names(run_dir: Path) -> set[str]:
-    mined_repos_path = run_dir / f"{MINNED_REPOS_FILENAME}.jsonl"
+def _mined_repo_names(run_dir: Path, mined_filename: str) -> set[str]:
+    mined_repos_path = run_dir / f"{mined_filename}.jsonl"
     if not mined_repos_path.exists():
         return set()
-    mined_repos = load_from_jsonl(run_dir, MINNED_REPOS_FILENAME)
+    mined_repos = load_from_jsonl(run_dir, mined_filename)
     return {repo["repo"] for repo in mined_repos}
 
 
-def _unmined_repos(repos: list[dict], run_dir: Path) -> list[dict]:
-    mined_repo_names = _mined_repo_names(run_dir)
+def _unmined_repos(repos: list[dict], run_dir: Path, mined_filename: str) -> list[dict]:
+    mined_repo_names = _mined_repo_names(run_dir, mined_filename)
     return [repo for repo in repos if repo["full_name"] not in mined_repo_names]
 
 
@@ -99,9 +112,7 @@ def _blobless_clone(repo_url: str, target_dir: str) -> None:
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"git clone failed for {repo_url}: {result.stderr.strip()}"
-        )
+        raise RuntimeError(f"git clone failed for {repo_url}: {result.stderr.strip()}")
 
 
 def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
@@ -180,7 +191,13 @@ def _mine_repo(
         return _collect_repo_files(repo, repo_full_name)
 
 
-def _mine_and_persist_repo(repo: dict, run_dir: Path, write_lock: Lock) -> int:
+def _mine_and_persist_repo(
+    repo: dict,
+    run_dir: Path,
+    write_lock: Lock,
+    data_filename: str,
+    mined_filename: str,
+) -> int:
     repo_url = repo["html_url"]
     try:
         repo_files = _mine_repo(
@@ -191,39 +208,92 @@ def _mine_and_persist_repo(repo: dict, run_dir: Path, write_lock: Lock) -> int:
             append_to_jsonl(
                 [{"repo": repo["full_name"], "error": str(error)}],
                 run_dir,
-                MINNED_REPOS_FILENAME,
+                mined_filename,
             )
         logging.warning("Failed to mine %s: %s", repo_url, error)
         return 0
 
     with write_lock:
-        append_to_jsonl(repo_files, run_dir, DATA_FILENAME)
+        append_to_jsonl(repo_files, run_dir, data_filename)
         append_to_jsonl(
-            [{"repo": repo["full_name"], "error": None}], run_dir, MINNED_REPOS_FILENAME
+            [{"repo": repo["full_name"], "error": None}], run_dir, mined_filename
         )
     return len(repo_files)
 
 
+def prepare_collection(
+    run_dir: Path,
+    max_repos: int | None,
+    repo_min_stars: int,
+    repos_per_task: int,
+) -> int:
+    repos = _get_repos(repo_min_stars, max_repos, run_dir)
+    num_tasks = max(1, math.ceil(len(repos) / repos_per_task))
+    logging.info(
+        "Prepared %d repositories into %d tasks (<=%d repos each)",
+        len(repos),
+        num_tasks,
+        repos_per_task,
+    )
+    return num_tasks
+
+
+def finalize_collection(run_dir: Path) -> None:
+    repo_file_shards = merge_jsonl_shards(run_dir, DATA_FILENAME)
+    mined_repo_shards = merge_jsonl_shards(run_dir, MINNED_REPOS_FILENAME)
+    logging.info(
+        "Merged %d %s shards and %d %s shards",
+        repo_file_shards,
+        DATA_FILENAME,
+        mined_repo_shards,
+        MINNED_REPOS_FILENAME,
+    )
+
+
 def collect_dataset(
     run_dir: Path,
+    task_id: int | None = None,
+    num_tasks: int | None = None,
     max_repos: int | None = None,
     repo_min_stars: int = 0,
-    num_workers: int = DEFAULT_MINING_WORKERS,
 ) -> None:
-    _clean_previous_data(run_dir)
+    in_jobs_array = task_id is not None and num_tasks is not None
+    if in_jobs_array:
+        data_filename, mined_filename = _get_shard_filenames(task_id, num_tasks)
+    else:
+        data_filename, mined_filename = DATA_FILENAME, MINNED_REPOS_FILENAME
 
     all_repos = _get_repos(repo_min_stars, max_repos, run_dir)
 
-    repos_to_mine = _unmined_repos(all_repos, run_dir)
+    sorted_repos = _sort_repos_by_size(all_repos)
+    if in_jobs_array:
+        # Ensure a balanced distribution of repo sizes across tasks
+        repos_partition = sorted_repos[task_id::num_tasks]
+    else:
+        repos_partition = sorted_repos
 
-    repos = _sort_repos_by_size(repos_to_mine)
+    _clean_previous_data(run_dir, data_filename, mined_filename)
+
+    repos = _unmined_repos(repos_partition, run_dir, mined_filename)
+
+    if not repos:
+        logging.info("No repositories left to mine for this task")
+        return
 
     write_lock = Lock()
+    workers = max(1, min(DEFAULT_MINING_WORKERS, len(repos)))
 
-    logging.info("Mining %d repositories with %d workers", len(repos), num_workers)
-    with ThreadPoolExecutor(max_workers=num_workers) as pool:
+    logging.info("Mining %d repositories with %d workers", len(repos), workers)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [
-            pool.submit(_mine_and_persist_repo, repo, run_dir, write_lock)
+            executor.submit(
+                _mine_and_persist_repo,
+                repo,
+                run_dir,
+                write_lock,
+                data_filename,
+                mined_filename,
+            )
             for repo in repos
         ]
         progress_bar = tqdm(
