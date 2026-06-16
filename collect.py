@@ -1,5 +1,6 @@
 from github import search_repos
 from comments import get_comments_from_file, strip_comments_from_file
+from runs import run_directory_timestamp
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
@@ -178,7 +179,7 @@ def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
 
 
 def _mine_repo(
-    repo_url: str, repo_full_name: str, branch: str, since: str
+    repo_url: str, repo_full_name: str, branch: str, since: str, to: datetime
 ) -> list[dict]:
     datetime_since = datetime.strptime(since, "%Y-%m-%d")
 
@@ -189,6 +190,7 @@ def _mine_repo(
         repo = Repository(
             clone_dir,
             since=datetime_since,
+            to=to,
             only_in_branch=branch,
             only_no_merge=True,
             only_modifications_with_file_types=[".py"],
@@ -203,11 +205,16 @@ def _mine_and_persist_repo(
     write_lock: Lock,
     data_filename: str,
     mined_filename: str,
+    mining_end: datetime,
 ) -> int:
     repo_url = repo["html_url"]
     try:
         repo_files = _mine_repo(
-            repo_url, repo["full_name"], repo["default_branch"], CUTOFF_DATE
+            repo_url,
+            repo["full_name"],
+            repo["default_branch"],
+            CUTOFF_DATE,
+            mining_end,
         )
     except Exception as error:
         with write_lock:
@@ -270,6 +277,7 @@ def collect_dataset(
         data_filename, mined_filename = DATA_FILENAME, MINNED_REPOS_FILENAME
 
     all_repos = _get_repos(repo_min_stars, max_repos, run_dir)
+    mining_end = run_directory_timestamp(run_dir)
 
     sorted_repos = _sort_repos_by_size(all_repos)
     if in_jobs_array:
@@ -299,6 +307,7 @@ def collect_dataset(
                 write_lock,
                 data_filename,
                 mined_filename,
+                mining_end,
             )
             for repo in repos
         ]

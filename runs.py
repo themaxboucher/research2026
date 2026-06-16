@@ -11,6 +11,10 @@ def create_new_run_directory() -> Path:
     return new_run_directory
 
 
+def run_directory_timestamp(run_directory: Path) -> datetime:
+    return datetime.strptime(run_directory.name, RUN_TIMESTAMP_FORMAT)
+
+
 def find_latest_run_directory() -> Path | None:
     if not RUNS_DIRECTORY.exists():
         return None
