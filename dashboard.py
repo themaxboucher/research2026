@@ -177,7 +177,10 @@ def _attach_generation_diffs(record: dict) -> None:
     source_code = record.get("source_code") or ""
     filepath = record.get("new_path") or record.get("filename") or "file.py"
     for generation in record.get("generations") or []:
-        generated_content = generation.get("generated_content") or ""
+        generated_content = generation.get("generated_content")
+        if not generated_content:
+            generation["diff_vs_source"] = ""
+            continue
         diff_lines = difflib.unified_diff(
             source_code.splitlines(keepends=True),
             generated_content.splitlines(keepends=True),

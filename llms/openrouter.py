@@ -2,13 +2,14 @@ import os
 from functools import lru_cache
 
 from dotenv import load_dotenv
-from openrouter import OpenRouter
 
 load_dotenv()
 
 
 @lru_cache(maxsize=1)
-def _load_client() -> OpenRouter:
+def _load_client():
+    from openrouter import OpenRouter
+
     return OpenRouter(api_key=os.environ["OPENROUTER_API_KEY"])
 
 

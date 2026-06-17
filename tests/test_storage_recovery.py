@@ -1,6 +1,6 @@
 import json
 
-from collect import _clean_previous_data
+from collect import DATA_FILENAME, MINNED_REPOS_FILENAME, _clean_previous_data
 from storage import drop_trailing_records, load_from_jsonl, truncate_broken_tail
 
 
@@ -123,7 +123,7 @@ def _mined_record(repo_name):
 
 
 def test_clean_missing_files_is_noop(tmp_path):
-    _clean_previous_data(tmp_path)
+    _clean_previous_data(tmp_path, DATA_FILENAME, MINNED_REPOS_FILENAME)
 
 
 def test_clean_completed_run_is_noop(tmp_path):
@@ -138,7 +138,7 @@ def test_clean_completed_run_is_noop(tmp_path):
         [_record_line(_mined_record("owner/a")), _record_line(_mined_record("owner/b"))],
     )
 
-    _clean_previous_data(tmp_path)
+    _clean_previous_data(tmp_path, DATA_FILENAME, MINNED_REPOS_FILENAME)
 
     assert len(load_from_jsonl(tmp_path, "repo_files")) == 2
     assert len(load_from_jsonl(tmp_path, "mined_repos")) == 2
@@ -156,7 +156,7 @@ def test_clean_removes_partial_data_line_of_interrupted_repo(tmp_path):
     )
     _write_lines(tmp_path, "mined_repos", [_record_line(_mined_record("owner/a"))])
 
-    _clean_previous_data(tmp_path)
+    _clean_previous_data(tmp_path, DATA_FILENAME, MINNED_REPOS_FILENAME)
 
     assert load_from_jsonl(tmp_path, "repo_files") == [_data_record("owner/a", 1)]
 
@@ -173,7 +173,7 @@ def test_clean_removes_unmarked_trailing_repo_block(tmp_path):
     )
     _write_lines(tmp_path, "mined_repos", [_record_line(_mined_record("owner/a"))])
 
-    _clean_previous_data(tmp_path)
+    _clean_previous_data(tmp_path, DATA_FILENAME, MINNED_REPOS_FILENAME)
 
     assert load_from_jsonl(tmp_path, "repo_files") == [_data_record("owner/a", 1)]
 
@@ -193,7 +193,7 @@ def test_clean_treats_repo_with_truncated_marker_as_unmined(tmp_path):
         [_record_line(_mined_record("owner/a")), '{"repo": "owner/b", "er'],
     )
 
-    _clean_previous_data(tmp_path)
+    _clean_previous_data(tmp_path, DATA_FILENAME, MINNED_REPOS_FILENAME)
 
     assert load_from_jsonl(tmp_path, "repo_files") == [_data_record("owner/a", 1)]
     assert load_from_jsonl(tmp_path, "mined_repos") == [_mined_record("owner/a")]
@@ -204,6 +204,6 @@ def test_clean_empties_data_when_no_repo_was_marked(tmp_path):
         tmp_path, "repo_files", [_record_line(_data_record("owner/a", 1))]
     )
 
-    _clean_previous_data(tmp_path)
+    _clean_previous_data(tmp_path, DATA_FILENAME, MINNED_REPOS_FILENAME)
 
     assert load_from_jsonl(tmp_path, "repo_files") == []
