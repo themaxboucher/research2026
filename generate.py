@@ -30,7 +30,6 @@ MODEL_PROFILES = {
             "meta-llama/llama-3.1-8b-instruct",
             "qwen/qwen-2.5-7b-instruct",
             "openai/gpt-5.5",
-            "anthropic/claude-sonnet-4.6",
         ],
         get_completion=openrouter.get_completion,
     ),
@@ -45,8 +44,6 @@ MODEL_PROFILES = {
 DEFAULT_MODEL_PROFILE = "local"
 
 ELIGIBLE_CHANGE_TYPES = {"ADD", "MODIFY"}
-
-GENERATION_ATTEMPTS = 3
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "file_few_shot.md"
 PROMPT_NAME = PROMPT_PATH.name
@@ -114,42 +111,24 @@ def _assert_code_preserved(generated_content: str, original_content: str) -> Non
         raise ValueError("Generated output altered the code, not just comments")
 
 
-def _generate_once(
-    task: GenerationTask,
-    model_name: str,
-    get_completion: Callable[[str, str], str],
-) -> tuple[str, list[SearchReplaceEdit]]:
-    prompt = _build_prompt(task)
-    llm_response = get_completion(model_name, prompt)
-    try:
-        edits = parse_edit_response(llm_response)
-        generated_content = apply_edits(task.code_with_outdated_comments, edits)
-        _assert_valid_python_syntax(generated_content)
-        _assert_code_preserved(generated_content, task.code_with_outdated_comments)
-    except Exception:
-        logging.warning(
-            "Raw response from %s for %s:\n%s",
-            model_name,
-            task.filepath,
-            llm_response,
-        )
-        raise
-    return generated_content, edits
-
-
 def _build_generation_record(
     model_name: str,
+    raw_response: str,
     generated_content: str,
-    edits: list[SearchReplaceEdit],
+    edits: list[SearchReplaceEdit] | None,
     previous_code: str | None,
+    error: str | None = None,
 ) -> dict:
     annotated_comments = get_comments_from_file(generated_content, previous_code or "")
+    generated_edits = [edit._asdict() for edit in edits] if edits is not None else None
     return {
         "model": model_name,
         "prompt": PROMPT_NAME,
+        "raw_response": raw_response,
         "generated_content": generated_content,
-        "generated_edits": [edit._asdict() for edit in edits],
+        "generated_edits": generated_edits,
         "generated_comments": annotated_comments,
+        "error": error,
     }
 
 
@@ -157,34 +136,27 @@ def generate_comments_with_model(
     task: GenerationTask,
     model_name: str,
     get_completion: Callable[[str, str], str],
-) -> dict | None:
-    for attempt in range(1, GENERATION_ATTEMPTS + 1):
-        try:
-            generated_content, edits = _generate_once(
-                task, model_name, get_completion
-            )
-        except Exception as error:
-            logging.warning(
-                "Model %s attempt %d/%d failed for %s: %s",
-                model_name,
-                attempt,
-                GENERATION_ATTEMPTS,
-                task.filepath,
-                error,
-            )
-            continue
-
-        return _build_generation_record(
-            model_name, generated_content, edits, task.previous_code
+) -> dict:
+    prompt = _build_prompt(task)
+    raw_response = get_completion(model_name, prompt)
+    try:
+        edits = parse_edit_response(raw_response)
+        generated_content = apply_edits(task.code_with_outdated_comments, edits)
+        _assert_valid_python_syntax(generated_content)
+        _assert_code_preserved(generated_content, task.code_with_outdated_comments)
+    except Exception as error:
+        logging.warning(
+            "Failed to generate comments for %s with model %s: %s",
+            task.filepath,
+            model_name,
+            error,
         )
-
-    logging.warning(
-        "Skipping model %s for %s after %d failed attempts",
-        model_name,
-        task.filepath,
-        GENERATION_ATTEMPTS,
+        return _build_generation_record(
+            model_name, raw_response, None, None, task.previous_code, str(error)
+        )
+    return _build_generation_record(
+        model_name, raw_response, generated_content, edits, task.previous_code
     )
-    return None
 
 
 def _source_file_path(source_file: dict) -> str:
@@ -211,9 +183,7 @@ def _build_generation_task(source_file: dict) -> GenerationTask:
     )
 
 
-def generate_comments_for_file(
-    source_file: dict, model_profile: ModelProfile
-) -> tuple[int, int]:
+def generate_comments_for_file(source_file: dict, model_profile: ModelProfile) -> None:
     try:
         task = _build_generation_task(source_file)
     except Exception as error:
@@ -222,11 +192,10 @@ def generate_comments_for_file(
             _source_file_path(source_file),
             error,
         )
-        source_file["generations"] = []
-        return 0, len(model_profile.model_names)
+        source_file["generations"] = None
+        return
 
-    successful_generations = []
-    failed_model_count = 0
+    generations = []
 
     num_models = len(model_profile.model_names)
 
@@ -243,13 +212,9 @@ def generate_comments_for_file(
 
         for generation_future in as_completed(generation_futures):
             generation = generation_future.result()
-            if generation is None:
-                failed_model_count += 1
-            else:
-                successful_generations.append(generation)
+            generations.append(generation)
 
-    source_file["generations"] = successful_generations
-    return len(successful_generations), failed_model_count
+    source_file["generations"] = generations
 
 
 def _is_eligible(source_file: dict) -> bool:
@@ -265,8 +230,6 @@ def generate_comments_for_dataset(run_dir: Path, limit: int | None = None) -> No
 
     save_to_jsonl([], run_dir, GENERATED_DATASET_FILENAME)  # Clears the output file
 
-    succeeded_generation_count = 0
-    failed_generation_count = 0
     files_processed = 0
 
     for source_file in file_data:
@@ -283,17 +246,7 @@ def generate_comments_for_dataset(run_dir: Path, limit: int | None = None) -> No
             files_processed + 1,
             limit,
         )
-        succeeded_for_file, failed_for_file = generate_comments_for_file(
-            source_file, model_profile
-        )
-        succeeded_generation_count += succeeded_for_file
-        failed_generation_count += failed_for_file
+        generate_comments_for_file(source_file, model_profile)
         files_processed += 1
-        append_to_jsonl([source_file], run_dir, GENERATED_DATASET_FILENAME)
 
-    logging.info(
-        "Saved enriched dataset to %s (%d generations succeeded, %d failed)",
-        run_dir / f"{GENERATED_DATASET_FILENAME}.jsonl",
-        succeeded_generation_count,
-        failed_generation_count,
-    )
+        append_to_jsonl([source_file], run_dir, GENERATED_DATASET_FILENAME)

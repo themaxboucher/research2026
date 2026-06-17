@@ -354,13 +354,24 @@
     color: white;
   }
   .gen-view-panel { flex: 1; overflow: auto; }
-  .gen-edit-block {
+  .gen-edit-block, .gen-raw {
     margin: 12px 16px;
     padding: 10px 12px;
     background: var(--bg-subtle);
     border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .gen-error-banner {
+    margin: 12px 16px;
+    padding: 10px 12px;
+    background: #ffebe9;
+    border: 1px solid #ff818266;
+    border-radius: 6px;
+    color: #cf222e;
+    font-size: 12px;
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -580,7 +591,8 @@ function generationTabs(record) {
     const short = (g.model || `gen ${i + 1}`).split("/").pop();
     seen[short] = (seen[short] || 0) + 1;
     const label = seen[short] > 1 ? `${short} #${seen[short]}` : short;
-    return { id: `gen:${i}`, label: `⚡ ${label}` };
+    const icon = g.error ? "⚠️" : "⚡";
+    return { id: `gen:${i}`, label: `${icon} ${label}` };
   });
 }
 
@@ -650,9 +662,17 @@ const GEN_VIEWS = [
   { id: "gencontent",  label: "Generated content" },
   { id: "gencomments", label: "Generated comments" },
   { id: "genedits",    label: "Raw edits" },
+  { id: "genraw",      label: "Raw response" },
 ];
 
 function renderGeneration(panel, generation) {
+  if (generation.error) {
+    const banner = document.createElement("div");
+    banner.className = "gen-error-banner";
+    banner.textContent = `⚠️ Generation failed: ${generation.error}`;
+    panel.appendChild(banner);
+  }
+
   const bar = document.createElement("div");
   bar.className = "gen-view-bar";
   for (const view of GEN_VIEWS) {
@@ -707,6 +727,17 @@ function renderGeneration(panel, generation) {
           "<<<<<<< SEARCH\n" + edit.search + "\n=======\n" + edit.replace + "\n>>>>>>> REPLACE";
         sub.appendChild(pre);
       }
+      return;
+    }
+    case "genraw": {
+      if (!generation.raw_response) {
+        sub.innerHTML = `<div class="empty-state">No raw response recorded.</div>`;
+        return;
+      }
+      const pre = document.createElement("pre");
+      pre.className = "gen-raw";
+      pre.textContent = generation.raw_response;
+      sub.appendChild(pre);
       return;
     }
   }
