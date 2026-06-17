@@ -66,6 +66,8 @@ set +a
 # Trim any trailing slash from the remote dir for clean path joins.
 CLUSTER_REMOTE_DIR="${CLUSTER_REMOTE_DIR%/}"
 
+CLUSTER_SCRATCH_DIR="$(dirname "$CLUSTER_REMOTE_DIR")/scratch/$(basename "$CLUSTER_REMOTE_DIR")"
+
 RSYNC_OPTS=(-az --partial --progress)
 if [[ "$DRY_RUN" -eq 1 ]]; then
   RSYNC_OPTS+=(--dry-run)
@@ -80,30 +82,30 @@ run_rsync() {
 mkdir -p runs
 
 if [[ "$WANT_ALL" -eq 1 ]]; then
-  echo "Pulling all runs from ${CLUSTER_SSH_HOST}:${CLUSTER_REMOTE_DIR}/runs/"
-  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_REMOTE_DIR}/runs/" "runs/"
+  echo "Pulling all runs from ${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/runs/"
+  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/runs/" "runs/"
 else
   if [[ -z "$RUN_TIMESTAMP" ]]; then
     echo "Finding newest run on ${CLUSTER_SSH_HOST}..."
     RUN_TIMESTAMP="$(ssh "$CLUSTER_SSH_HOST" \
-      "cd '$CLUSTER_REMOTE_DIR' && ls -1d runs/*/ 2>/dev/null | sort | tail -n1")"
+      "cd '$CLUSTER_SCRATCH_DIR' && ls -1d runs/*/ 2>/dev/null | sort | tail -n1")"
     RUN_TIMESTAMP="${RUN_TIMESTAMP#runs/}"
     RUN_TIMESTAMP="${RUN_TIMESTAMP%/}"
     if [[ -z "$RUN_TIMESTAMP" ]]; then
-      echo "No runs found under ${CLUSTER_REMOTE_DIR}/runs on the cluster." >&2
+      echo "No runs found under ${CLUSTER_SCRATCH_DIR}/runs on the cluster." >&2
       exit 1
     fi
     echo "Newest run: $RUN_TIMESTAMP"
   fi
   # Source has no trailing slash so the timestamp dir itself lands inside runs/.
-  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_REMOTE_DIR}/runs/${RUN_TIMESTAMP}" "runs/"
+  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/runs/${RUN_TIMESTAMP}" "runs/"
 fi
 
 if [[ "$WANT_LOGS" -eq 1 ]]; then
   echo "Pulling SLURM logs..."
   mkdir -p logs
   # Logs may not exist yet on a brand-new checkout; don't fail the whole pull.
-  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_REMOTE_DIR}/logs/" "logs/" || \
+  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/logs/" "logs/" || \
     echo "(no logs/ on the cluster yet, skipping)"
 fi
 
