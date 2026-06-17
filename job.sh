@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=mine-code-comments
-#SBATCH --time=04:00:00
+#SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=256G
 #SBATCH --output=logs/mine-code-comments-%A_%a.out
 #SBATCH --error=logs/mine-code-comments-%A_%a.err
 
