@@ -75,15 +75,22 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 
 run_rsync() {
-  echo "+ rsync ${RSYNC_OPTS[*]} -e ssh $1 $2"
-  rsync "${RSYNC_OPTS[@]}" -e ssh "$1" "$2"
+  local src="$1" dst="$2"
+  shift 2
+  echo "+ rsync ${RSYNC_OPTS[*]} $* -e ssh $src $dst"
+  rsync "${RSYNC_OPTS[@]}" "$@" -e ssh "$src" "$dst"
 }
+
+# Only pull the aggregated JSONL outputs from a run, never the numbered shards.
+# --prune-empty-dirs keeps the timestamp dir(s) but drops empty shard subdirs.
+RUN_FILTERS=(--prune-empty-dirs --include='*/' \
+  --include='mined_repos.jsonl' --include='repo_files.jsonl' --exclude='*')
 
 mkdir -p runs
 
 if [[ "$WANT_ALL" -eq 1 ]]; then
   echo "Pulling all runs from ${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/runs/"
-  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/runs/" "runs/"
+  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/runs/" "runs/" "${RUN_FILTERS[@]}"
 else
   if [[ -z "$RUN_TIMESTAMP" ]]; then
     echo "Finding newest run on ${CLUSTER_SSH_HOST}..."
@@ -97,8 +104,11 @@ else
     fi
     echo "Newest run: $RUN_TIMESTAMP"
   fi
-  # Source has no trailing slash so the timestamp dir itself lands inside runs/.
-  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/runs/${RUN_TIMESTAMP}" "runs/"
+  # Trailing slashes so the filters apply to the run dir's own contents and the
+  # files land directly under runs/${RUN_TIMESTAMP}/.
+  mkdir -p "runs/${RUN_TIMESTAMP}"
+  run_rsync "${CLUSTER_SSH_HOST}:${CLUSTER_SCRATCH_DIR}/runs/${RUN_TIMESTAMP}/" \
+    "runs/${RUN_TIMESTAMP}/" "${RUN_FILTERS[@]}"
 fi
 
 if [[ "$WANT_LOGS" -eq 1 ]]; then
