@@ -2,6 +2,7 @@ from runs import require_latest_run_directory
 from storage import iter_from_jsonl, save_to_jsonl
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+from tqdm.auto import tqdm
 import argparse
 import logging
 import random
@@ -17,7 +18,8 @@ def _reservoir_sample(
     # Reservoir sampling keeps a uniform random subset in a single pass, so we
     # never hold the full repo_files.jsonl (>100 GB) in memory.
     reservoir: list[dict] = []
-    for index, record in enumerate(records):
+    progress_bar = tqdm(records, desc="Sampling records", unit="record")
+    for index, record in enumerate(progress_bar):
         if index < sample_size:
             reservoir.append(record)
             continue
