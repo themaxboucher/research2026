@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from runs import require_latest_run_directory
 
-DATASET_FILENAME = "repo_files"
+DATASET_FILENAME = "repo_files_sample"
 GENERATED_FILENAME = "files_generated"
 DASHBOARD_HTML = Path(__file__).parent / "dashboard.html"
 DEFAULT_PAGE_LIMIT = 200
