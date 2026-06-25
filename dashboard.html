@@ -101,14 +101,47 @@
     overflow-y: auto;
     flex: 1;
   }
-  ul.records li {
-    padding: 8px 10px;
+  ul.records li.record {
+    padding: 8px 10px 8px 18px;
     border-bottom: 1px solid var(--border);
+    border-left: 3px solid var(--border);
     cursor: pointer;
     font-size: 12px;
   }
-  ul.records li:hover { background: #eef2f6; }
-  ul.records li.selected { background: #ddebf7; }
+  ul.records li.record:hover { background: #eef2f6; }
+  ul.records li.record.selected { background: #ddebf7; border-left-color: var(--accent); }
+  ul.records li.group-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 6px 10px;
+    background: #eaeef2;
+    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  ul.records li.group-header .group-repo {
+    font-weight: 600;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+  }
+  ul.records li.group-header .group-hash {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  ul.records li.group-header .group-count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
   ul.records .row1 {
     display: flex;
     align-items: center;
@@ -127,14 +160,6 @@
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
     font-size: 11px;
-  }
-  ul.records .row2 {
-    color: var(--text-muted);
-    font-size: 11px;
-    margin-top: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .chip {
     display: inline-block;
@@ -429,6 +454,9 @@ const state = {
   currentRecord: null,
   activeTab: "diff",
   genView: "gendiff",
+  groupKey: null,
+  groupCountEl: null,
+  groupCount: 0,
 };
 
 async function loadMeta() {
@@ -492,6 +520,9 @@ async function reloadRecords() {
   state.rows = [];
   state.total = 0;
   state.nextOffset = 0;
+  state.groupKey = null;
+  state.groupCountEl = null;
+  state.groupCount = 0;
   document.getElementById("records-list").innerHTML = "";
   await loadMoreRecords();
 }
@@ -517,12 +548,38 @@ function maybeLoadMore() {
   if (hasMore && notScrollable) loadMoreRecords();
 }
 
+function appendGroupHeader(list, r) {
+  const repo = r.repo_name || "(no repo)";
+  const hash = r.commit_hash ? r.commit_hash.slice(0, 7) : "";
+  const header = document.createElement("li");
+  header.className = "group-header";
+  header.innerHTML = `
+    <span class="group-repo" title="${escapeHTML(repo)}">${escapeHTML(repo)}</span>
+    ${hash ? `<span class="group-hash">${escapeHTML(hash)}</span>` : ""}
+    <span class="group-count"></span>
+  `;
+  list.appendChild(header);
+  state.groupCountEl = header.querySelector(".group-count");
+  state.groupCount = 0;
+}
+
 function appendRows(rows) {
   const list = document.getElementById("records-list");
   for (const r of rows) {
     state.rows.push(r);
     const idx = r.index;
+    const groupKey = `${r.repo_name || ""}@${r.commit_hash || ""}`;
+    if (groupKey !== state.groupKey) {
+      state.groupKey = groupKey;
+      appendGroupHeader(list, r);
+    }
+    state.groupCount += 1;
+    if (state.groupCountEl) {
+      state.groupCountEl.textContent =
+        `${state.groupCount} file${state.groupCount === 1 ? "" : "s"}`;
+    }
     const li = document.createElement("li");
+    li.className = "record";
     li.dataset.index = String(idx);
     if (state.selectedIndex === idx) li.classList.add("selected");
 
@@ -547,21 +604,14 @@ function appendRows(rows) {
       row1.appendChild(gen);
     }
 
-    const row2 = document.createElement("div");
-    row2.className = "row2";
-    const repo = r.repo_name || "?";
-    const hash = r.commit_hash ? r.commit_hash.slice(0, 7) : "";
-    row2.textContent = hash ? `${repo} @ ${hash}` : repo;
-    row2.title = row2.textContent;
-
-    li.append(row1, row2);
+    li.append(row1);
     li.addEventListener("click", () => selectRecord(idx));
     list.appendChild(li);
   }
 }
 
 function markSelection() {
-  for (const li of document.querySelectorAll("#records-list li")) {
+  for (const li of document.querySelectorAll("#records-list li.record")) {
     li.classList.toggle("selected", Number(li.dataset.index) === state.selectedIndex);
   }
 }
