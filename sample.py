@@ -9,51 +9,113 @@ import random
 
 DATA_FILENAME = "repo_files"
 SAMPLE_FILENAME = "repo_files_sample"
-DEFAULT_SAMPLE_SIZE = 100
+DEFAULT_NUM_COMMITS = 100
+DEFAULT_MAX_FILES_PER_COMMIT = 5
 
 
-def _reservoir_sample(
-    records: Iterable[dict], sample_size: int, random_num_generator: random.Random
-) -> list[dict]:
-    # Reservoir sampling keeps a uniform random subset in a single pass, so we
-    # never hold the full repo_files.jsonl (>100 GB) in memory.
-    reservoir: list[dict] = []
+def _commit_key(record: dict) -> tuple[str, str]:
+    return record["repo_name"], record["commit_hash"]
+
+
+def _iter_commit_groups(records: Iterable[dict]) -> Iterator[list[dict]]:
+    seen_keys: set[int] = set()
+    current_key: tuple[str, str] | None = None
+    current_group: list[dict] = []
+
+    for record in records:
+        key = _commit_key(record)
+        if key != current_key:
+            if current_group:
+                yield current_group
+            if current_key is not None:
+                key_digest = hash(current_key)
+                if key_digest in seen_keys:
+                    logging.warning(
+                        "Commit %s reappeared non-consecutively; its files may be "
+                        "split across multiple groups",
+                        current_key,
+                    )
+                seen_keys.add(key_digest)
+            current_key = key
+            current_group = []
+        current_group.append(record)
+
+    if current_group:
+        yield current_group
+
+
+def _reservoir_sample_commits(
+    records: Iterable[dict],
+    num_commits: int,
+    max_files_per_commit: int,
+    random_num_generator: random.Random,
+) -> list[list[dict]]:
+    # Reservoir sampling keeps a uniform random subset of qualifying commits in a
+    # single pass, so we never hold the full repo_files.jsonl (>100 GB) in memory.
+    reservoir: list[list[dict]] = []
+    qualifying_index = 0
     progress_bar = tqdm(records, desc="Sampling records", unit="record")
-    for index, record in enumerate(progress_bar):
-        if index < sample_size:
-            reservoir.append(record)
+    for group in _iter_commit_groups(progress_bar):
+        if len(group) > max_files_per_commit:
             continue
 
-        candidate_index = random_num_generator.randint(0, index)
-        if candidate_index < sample_size:
-            reservoir[candidate_index] = record
+        if qualifying_index < num_commits:
+            reservoir.append(group)
+        else:
+            candidate_index = random_num_generator.randint(0, qualifying_index)
+            if candidate_index < num_commits:
+                reservoir[candidate_index] = group
+        qualifying_index += 1
 
     return reservoir
 
 
 def sample_dataset(
     run_dir: Path,
-    sample_size: int = DEFAULT_SAMPLE_SIZE,
+    num_commits: int = DEFAULT_NUM_COMMITS,
+    max_files_per_commit: int = DEFAULT_MAX_FILES_PER_COMMIT,
     seed: int | None = None,
 ) -> int:
     random_num_generator = random.Random(seed)
     records: Iterator[dict] = iter_from_jsonl(run_dir, DATA_FILENAME)
-    sample = _reservoir_sample(records, sample_size, random_num_generator)
+    sampled_commits = _reservoir_sample_commits(
+        records, num_commits, max_files_per_commit, random_num_generator
+    )
 
+    if len(sampled_commits) < num_commits:
+        logging.warning(
+            "Only %d commits with <= %d files were available; requested %d",
+            len(sampled_commits),
+            max_files_per_commit,
+            num_commits,
+        )
+
+    sample = [record for group in sampled_commits for record in group]
     save_to_jsonl(sample, run_dir, SAMPLE_FILENAME)
-    logging.info("Wrote %d sampled records to %s.jsonl", len(sample), SAMPLE_FILENAME)
+    logging.info(
+        "Wrote %d files from %d commits to %s.jsonl",
+        len(sample),
+        len(sampled_commits),
+        SAMPLE_FILENAME,
+    )
     return len(sample)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Randomly sample entries from repo_files.jsonl"
+        description="Sample whole commits (and all their files) from repo_files.jsonl"
     )
     parser.add_argument(
-        "--sample-size",
+        "--num-commits",
         type=int,
-        default=DEFAULT_SAMPLE_SIZE,
-        help="Number of entries to sample (default: %(default)s)",
+        default=DEFAULT_NUM_COMMITS,
+        help="Number of commits to sample (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--max-files-per-commit",
+        type=int,
+        default=DEFAULT_MAX_FILES_PER_COMMIT,
+        help="Only sample commits with at most this many files (default: %(default)s)",
     )
     parser.add_argument(
         "--seed",
@@ -71,7 +133,12 @@ def main() -> None:
 
     run_dir = Path(args.run_dir) if args.run_dir else require_latest_run_directory()
     logging.info("Sampling from run directory: %s", run_dir)
-    sample_dataset(run_dir, sample_size=args.sample_size, seed=args.seed)
+    sample_dataset(
+        run_dir,
+        num_commits=args.num_commits,
+        max_files_per_commit=args.max_files_per_commit,
+        seed=args.seed,
+    )
 
 
 if __name__ == "__main__":
