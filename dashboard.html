@@ -1,656 +1,1026 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>repo_files dashboard</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-<script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
-<style>
-  :root {
-    --bg: #ffffff;
-    --bg-subtle: #f6f8fa;
-    --border: #d0d7de;
-    --text: #1f2328;
-    --text-muted: #57606a;
-    --accent: #0969da;
-    --chip-add: #dafbe1;
-    --chip-add-fg: #1a7f37;
-    --chip-modify: #fff8c5;
-    --chip-modify-fg: #9a6700;
-    --chip-delete: #ffebe9;
-    --chip-delete-fg: #cf222e;
-    --chip-rename: #ddf4ff;
-    --chip-rename-fg: #0969da;
-    --chip-default: #eaeef2;
-    --chip-default-fg: #57606a;
-    --comment-marker: #ffaa33;
-  }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    color: var(--text);
-    background: var(--bg);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  header.topbar {
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-subtle);
-    display: flex;
-    align-items: baseline;
-    gap: 16px;
-    flex-shrink: 0;
-  }
-  header.topbar h1 { font-size: 14px; margin: 0; font-weight: 600; }
-  header.topbar .meta { font-size: 12px; color: var(--text-muted); }
-  main {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-  }
-  aside.sidebar {
-    width: 360px;
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-subtle);
-    flex-shrink: 0;
-  }
-  .sidebar-controls {
-    padding: 10px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .sidebar-controls input[type="text"] {
-    width: 100%;
-    padding: 6px 8px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 13px;
-    background: var(--bg);
-  }
-  .filter-row { display: flex; flex-wrap: wrap; gap: 4px; }
-  .filter-row label {
-    font-size: 11px;
-    padding: 2px 8px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    cursor: pointer;
-    background: var(--bg);
-    user-select: none;
-  }
-  .filter-row input[type="checkbox"] { display: none; }
-  .filter-row label.active { background: var(--accent); color: white; border-color: var(--accent); }
-  .sidebar-count {
-    font-size: 11px;
-    color: var(--text-muted);
-    padding: 0 4px;
-  }
-  ul.records {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    overflow-y: auto;
-    flex: 1;
-  }
-  ul.records li.record {
-    padding: 8px 10px 8px 18px;
-    border-bottom: 1px solid var(--border);
-    border-left: 3px solid var(--border);
-    cursor: pointer;
-    font-size: 12px;
-  }
-  ul.records li.record:hover { background: #eef2f6; }
-  ul.records li.record.selected { background: #ddebf7; border-left-color: var(--accent); }
-  ul.records li.group-header {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    padding: 6px 10px;
-    background: #eaeef2;
-    border-bottom: 1px solid var(--border);
-    border-top: 1px solid var(--border);
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-  ul.records li.group-header .group-repo {
-    font-weight: 600;
-    font-size: 12px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    direction: rtl;
-    text-align: left;
-  }
-  ul.records li.group-header .group-hash {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-  ul.records li.group-header .group-count {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--text-muted);
-    flex-shrink: 0;
-  }
-  ul.records .row1 {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  ul.records .filename {
-    font-weight: 600;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    direction: rtl;
-    text-align: left;
-  }
-  ul.records .nloc {
-    color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
-    font-size: 11px;
-  }
-  .chip {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: 10px;
-    font-size: 10px;
-    font-weight: 600;
-    background: var(--chip-default);
-    color: var(--chip-default-fg);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
-  .chip.ADD { background: var(--chip-add); color: var(--chip-add-fg); }
-  .chip.MODIFY { background: var(--chip-modify); color: var(--chip-modify-fg); }
-  .chip.DELETE { background: var(--chip-delete); color: var(--chip-delete-fg); }
-  .chip.RENAME { background: var(--chip-rename); color: var(--chip-rename-fg); }
-  section.detail {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .detail-header {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg);
-    flex-shrink: 0;
-  }
-  .detail-title {
-    font-size: 15px;
-    font-weight: 600;
-    margin: 0 0 4px 0;
-    word-break: break-all;
-  }
-  .detail-sub {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-bottom: 8px;
-    word-break: break-all;
-  }
-  .badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    font-size: 11px;
-  }
-  .badge {
-    padding: 2px 8px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-subtle);
-  }
-  .badge.add { color: var(--chip-add-fg); }
-  .badge.del { color: var(--chip-delete-fg); }
-  .tabs {
-    display: flex;
-    gap: 0;
-    padding: 0 12px;
-    background: var(--bg-subtle);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    overflow-x: auto;
-  }
-  .tabs button {
-    background: none;
-    border: none;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--text-muted);
-    border-bottom: 2px solid transparent;
-    white-space: nowrap;
-  }
-  .tabs button:hover { color: var(--text); }
-  .tabs button.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-    font-weight: 600;
-  }
-  .tab-panel {
-    flex: 1;
-    overflow: auto;
-    background: var(--bg);
-  }
-  .tab-panel.hidden { display: none; }
-  .empty-state {
-    padding: 40px;
-    color: var(--text-muted);
-    font-size: 14px;
-    text-align: center;
-  }
-
-  /* Code block with line numbers + comment gutter markers */
-  .code-wrap {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.5;
-  }
-  .code-wrap pre { margin: 0; }
-  .code-line {
-    display: grid;
-    grid-template-columns: 32px 14px 1fr;
-    align-items: start;
-  }
-  .code-line .lineno {
-    text-align: right;
-    padding-right: 8px;
-    color: var(--text-muted);
-    user-select: none;
-    background: var(--bg-subtle);
-    border-right: 1px solid var(--border);
-  }
-  .code-line .marker {
-    background: var(--bg-subtle);
-    border-right: 1px solid var(--border);
-  }
-  .code-line.has-comment .marker {
-    background: var(--comment-marker);
-  }
-  .code-line .content {
-    padding-left: 8px;
-    white-space: pre;
-    overflow-x: visible;
-  }
-
-  /* Comments tab */
-  table.comments-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
-  }
-  table.comments-table th, table.comments-table td {
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    text-align: left;
-    vertical-align: top;
-  }
-  table.comments-table th {
-    background: var(--bg-subtle);
-    position: sticky;
-    top: 0;
-    font-weight: 600;
-  }
-  table.comments-table .comment-text {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-width: 0;
-  }
-  table.comments-table .comment-anchor {
-    max-width: 0;
-  }
-  table.comments-table .anchor-code {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 11px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 1px 6px;
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: inline-block;
-    max-width: 100%;
-    vertical-align: middle;
-  }
-  table.comments-table .anchor-empty {
-    color: var(--text-muted);
-  }
-  .comment-type-chip {
-    display: inline-block;
-    padding: 1px 8px;
-    border-radius: 10px;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-  .comment-type-chip.inline { background: #ddf4ff; color: #0969da; }
-  .comment-type-chip.block { background: #fff8c5; color: #9a6700; }
-  .comment-type-chip.docstring { background: #dafbe1; color: #1a7f37; }
-
-  /* generations */
-  .gen-badge {
-    font-size: 10px;
-    font-weight: 600;
-    color: #6639ba;
-    background: #fbefff;
-    border-radius: 10px;
-    padding: 1px 6px;
-    flex-shrink: 0;
-  }
-  .filter-row label.gen-filter.active {
-    background: #6639ba;
-    border-color: #6639ba;
-    color: white;
-  }
-  .gen-view-bar {
-    display: flex;
-    gap: 4px;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-subtle);
-  }
-  .gen-view-bar button {
-    font-size: 11px;
-    padding: 3px 10px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    cursor: pointer;
-    background: var(--bg);
-    color: var(--text);
-  }
-  .gen-view-bar button.active {
-    background: #6639ba;
-    border-color: #6639ba;
-    color: white;
-  }
-  .gen-view-panel { flex: 1; overflow: auto; }
-  .gen-edit-block, .gen-raw {
-    margin: 12px 16px;
-    padding: 10px 12px;
-    background: var(--bg-subtle);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 11px;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .gen-error-banner {
-    margin: 12px 16px;
-    padding: 10px 12px;
-    background: #ffebe9;
-    border: 1px solid #ff818266;
-    border-radius: 6px;
-    color: #cf222e;
-    font-size: 12px;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  /* diff2html tweaks */
-  .d2h-wrapper { padding: 8px 16px; }
-</style>
-</head>
-<body>
-<header class="topbar">
-  <h1>repo_files dashboard</h1>
-  <span class="meta" id="dataset-meta"></span>
-</header>
-<main>
-  <aside class="sidebar">
-    <div class="sidebar-controls">
-      <input type="text" id="search" placeholder="Search filename / path / repo">
-      <div class="filter-row" id="change-type-filters"></div>
-      <div class="sidebar-count" id="sidebar-count"></div>
-    </div>
-    <ul class="records" id="records-list"></ul>
-  </aside>
-  <section class="detail">
-    <div class="detail-header" id="detail-header">
-      <div class="empty-state">Select a record from the list</div>
-    </div>
-    <div class="tabs" id="tabs" style="display:none;"></div>
-    <div class="tab-panel" id="tab-panel"></div>
-  </section>
-</main>
-
-<script>
-const TABS = [
-  { id: "diff",   label: "Diff" },
-  { id: "cur",    label: "Current" },
-  { id: "prev",   label: "Previous" },
-  { id: "curnc",  label: "Current (no comments)" },
-  { id: "prevnc", label: "Previous (no comments)" },
-  { id: "comments", label: "Comments" },
-  { id: "raw",    label: "Raw JSON" },
-];
-
-const PAGE_SIZE = 200;
-
-const state = {
-  rows: [],
-  total: 0,
-  nextOffset: 0,
-  loading: false,
-  changeTypes: [],
-  search: "",
-  activeChangeTypes: new Set(),
-  genOnly: false,
-  selectedIndex: null,
-  currentRecord: null,
-  activeTab: "diff",
-  genView: "gendiff",
-  groupKey: null,
-  groupCountEl: null,
-  groupCount: 0,
-};
-
-async function loadMeta() {
-  const response = await fetch("/meta");
-  const meta = await response.json();
-  document.getElementById("dataset-meta").textContent =
-    `${meta.count} records across ${meta.repo_count} repos · ${meta.comment_count} comments`;
-  state.changeTypes = meta.change_types || [];
-  initChangeTypeFilters();
-  await reloadRecords();
-}
-
-function initChangeTypeFilters() {
-  state.activeChangeTypes = new Set(state.changeTypes);
-  const container = document.getElementById("change-type-filters");
-  container.innerHTML = "";
-
-  const genLabel = document.createElement("label");
-  genLabel.className = "gen-filter";
-  genLabel.textContent = "⚡ generated only";
-  genLabel.addEventListener("click", () => {
-    state.genOnly = !state.genOnly;
-    genLabel.classList.toggle("active", state.genOnly);
-    reloadRecords();
-  });
-  container.appendChild(genLabel);
-
-  for (const type of state.changeTypes) {
-    const label = document.createElement("label");
-    label.className = "active";
-    label.textContent = type;
-    label.dataset.type = type;
-    label.addEventListener("click", () => {
-      if (state.activeChangeTypes.has(type)) {
-        state.activeChangeTypes.delete(type);
-        label.classList.remove("active");
-      } else {
-        state.activeChangeTypes.add(type);
-        label.classList.add("active");
+  <head>
+    <meta charset="UTF-8" />
+    <title>Research Dashboard</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --bg-subtle: #161b22;
+        --border: #30363d;
+        --text: #e6edf3;
+        --text-muted: #8b949e;
+        --accent: #2f81f7;
+        --chip-add: rgba(46, 160, 67, 0.15);
+        --chip-add-fg: #3fb950;
+        --chip-modify: rgba(187, 128, 9, 0.15);
+        --chip-modify-fg: #d29922;
+        --chip-delete: rgba(248, 81, 73, 0.15);
+        --chip-delete-fg: #f85149;
+        --chip-rename: rgba(56, 139, 253, 0.15);
+        --chip-rename-fg: #58a6ff;
+        --chip-default: rgba(110, 118, 129, 0.2);
+        --chip-default-fg: #8b949e;
+        --comment-marker: #d29922;
+        --border-muted: #21262d;
       }
-      reloadRecords();
-    });
-    container.appendChild(label);
-  }
-}
+      ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #484f58;
+        border: 3px solid var(--bg);
+        border-radius: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+          sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        font-size: 13px;
+        line-height: 1.5;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      header.topbar {
+        padding: 14px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-subtle);
+        display: flex;
+        align-items: baseline;
+        gap: 16px;
+        flex-shrink: 0;
+      }
+      header.topbar h1 {
+        font-size: 16px;
+        margin: 0;
+        font-weight: 600;
+      }
+      header.topbar .meta {
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+      main {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      aside.sidebar {
+        width: 380px;
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-subtle);
+        flex-shrink: 0;
+      }
+      .sidebar-controls {
+        padding: 16px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .sidebar-controls input[type="text"] {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 13px;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .sidebar-controls input[type="text"]::placeholder {
+        color: var(--text-muted);
+      }
+      .filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .filter-row label {
+        font-size: 12px;
+        padding: 4px 12px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        cursor: pointer;
+        background: var(--bg);
+        user-select: none;
+      }
+      .filter-row input[type="checkbox"] {
+        display: none;
+      }
+      .filter-row label.active {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+      }
+      .sidebar-count {
+        font-size: 12px;
+        color: var(--text-muted);
+        padding: 0 4px;
+      }
+      ul.records {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+        flex: 1;
+      }
+      ul.records li.record {
+        padding: 12px 16px 12px 36px;
+        border-bottom: 1px solid var(--border-muted);
+        border-left: 3px solid transparent;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      ul.records li.record:hover {
+        background: #161b22;
+      }
+      ul.records li.record.selected {
+        background: rgba(56, 139, 253, 0.15);
+        border-left-color: var(--accent);
+      }
+      ul.records li.repo-header {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        padding: 12px 16px;
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      ul.records li.repo-header .repo-name {
+        font-weight: 700;
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        direction: rtl;
+        text-align: left;
+      }
+      ul.records li.repo-header .repo-count {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      ul.records li.commit-header {
+        position: sticky;
+        top: 45px;
+        z-index: 2;
+        padding: 8px 16px 8px 24px;
+        background: var(--bg-subtle);
+        border-bottom: 1px solid var(--border-muted);
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+      ul.records li.commit-header .commit-hash {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      ul.records li.commit-header .commit-count {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      ul.records .row1 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+      ul.records .filename {
+        font-weight: 600;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        direction: rtl;
+        text-align: left;
+      }
+      ul.records .nloc {
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+      }
+      .record-comments {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .record-comment {
+        padding: 6px 8px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border-muted);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .record-comment:hover {
+        border-color: var(--border);
+        background: #1c2128;
+      }
+      .record-comment .rc-meta {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+      }
+      .status-pill {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .status-pill.added {
+        background: var(--chip-add);
+        color: var(--chip-add-fg);
+      }
+      .status-pill.modified {
+        background: var(--chip-modify);
+        color: var(--chip-modify-fg);
+      }
+      .record-comment .rc-line {
+        margin-left: auto;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .record-comment .rc-text {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--text);
+        white-space: pre-wrap;
+        word-break: break-word;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .chip {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 600;
+        background: var(--chip-default);
+        color: var(--chip-default-fg);
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+      }
+      .chip.ADD {
+        background: var(--chip-add);
+        color: var(--chip-add-fg);
+      }
+      .chip.MODIFY {
+        background: var(--chip-modify);
+        color: var(--chip-modify-fg);
+      }
+      .chip.DELETE {
+        background: var(--chip-delete);
+        color: var(--chip-delete-fg);
+      }
+      .chip.RENAME {
+        background: var(--chip-rename);
+        color: var(--chip-rename-fg);
+      }
+      section.detail {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .detail-header {
+        padding: 20px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+        flex-shrink: 0;
+      }
+      .detail-title {
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 1.3;
+        margin: 0 0 6px 0;
+        word-break: break-all;
+      }
+      .detail-sub {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 16px;
+        word-break: break-all;
+      }
+      .badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        font-size: 12px;
+      }
+      .badge {
+        padding: 3px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--bg-subtle);
+      }
+      .badge.add {
+        color: var(--chip-add-fg);
+      }
+      .badge.del {
+        color: var(--chip-delete-fg);
+      }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        padding: 0 16px;
+        background: var(--bg-subtle);
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        overflow-x: auto;
+      }
+      .tabs button {
+        background: none;
+        border: none;
+        padding: 12px 14px;
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--text-muted);
+        border-bottom: 2px solid transparent;
+        white-space: nowrap;
+      }
+      .tabs button:hover {
+        color: var(--text);
+      }
+      .tabs button.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+        font-weight: 600;
+      }
+      .tab-panel {
+        flex: 1;
+        overflow: auto;
+        background: var(--bg);
+      }
+      .tab-panel.hidden {
+        display: none;
+      }
+      .empty-state {
+        padding: 64px 40px;
+        color: var(--text-muted);
+        font-size: 14px;
+        text-align: center;
+      }
 
-function recordsQuery(offset) {
-  const params = new URLSearchParams();
-  params.set("offset", String(offset));
-  params.set("limit", String(PAGE_SIZE));
-  const query = state.search.trim();
-  if (query) params.set("q", query);
-  if (state.activeChangeTypes.size !== state.changeTypes.length) {
-    params.set("types", Array.from(state.activeChangeTypes).join(","));
-  }
-  if (state.genOnly) params.set("gen", "1");
-  return params.toString();
-}
+      /* Code block with line numbers + comment gutter markers */
+      .code-wrap {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.7;
+        padding: 8px 0;
+      }
+      .code-wrap pre {
+        margin: 0;
+      }
+      .code-line {
+        display: grid;
+        grid-template-columns: 48px 16px 1fr;
+        align-items: start;
+      }
+      .code-line .lineno {
+        text-align: right;
+        padding-right: 12px;
+        color: var(--text-muted);
+        user-select: none;
+        background: var(--bg-subtle);
+        border-right: 1px solid var(--border-muted);
+      }
+      .code-line .marker {
+        background: var(--bg-subtle);
+        border-right: 1px solid var(--border-muted);
+      }
+      .code-line.has-comment .marker {
+        background: var(--comment-marker);
+      }
+      .code-line .content {
+        padding-left: 16px;
+        white-space: pre;
+        overflow-x: visible;
+      }
 
-async function reloadRecords() {
-  state.rows = [];
-  state.total = 0;
-  state.nextOffset = 0;
-  state.groupKey = null;
-  state.groupCountEl = null;
-  state.groupCount = 0;
-  document.getElementById("records-list").innerHTML = "";
-  await loadMoreRecords();
-}
+      /* Comments tab */
+      table.comments-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      table.comments-table th,
+      table.comments-table td {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border-muted);
+        text-align: left;
+        vertical-align: top;
+      }
+      table.comments-table th {
+        background: var(--bg-subtle);
+        position: sticky;
+        top: 0;
+        font-weight: 600;
+      }
+      table.comments-table .comment-text {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-width: 0;
+      }
+      table.comments-table .comment-anchor {
+        max-width: 0;
+      }
+      table.comments-table .anchor-code {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 1px 6px;
+        color: var(--text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: inline-block;
+        max-width: 100%;
+        vertical-align: middle;
+      }
+      table.comments-table .anchor-empty {
+        color: var(--text-muted);
+      }
+      .comment-type-chip {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .comment-type-chip.inline {
+        background: rgba(56, 139, 253, 0.15);
+        color: #58a6ff;
+      }
+      .comment-type-chip.block {
+        background: rgba(219, 109, 40, 0.15);
+        color: #e3873c;
+      }
+      .comment-type-chip.docstring {
+        background: rgba(46, 160, 67, 0.15);
+        color: #3fb950;
+      }
+      table.comments-table.clickable tbody tr {
+        cursor: pointer;
+      }
+      table.comments-table.clickable tbody tr:hover {
+        background: #161b22;
+      }
 
-async function loadMoreRecords() {
-  if (state.loading) return;
-  if (state.rows.length && state.rows.length >= state.total) return;
-  state.loading = true;
-  const response = await fetch(`/records?${recordsQuery(state.nextOffset)}`);
-  const data = await response.json();
-  state.total = data.total;
-  state.nextOffset += data.rows.length;
-  appendRows(data.rows);
-  updateSidebarCount();
-  state.loading = false;
-  maybeLoadMore();
-}
+      /* Comment detail view */
+      .detail-back-bar {
+        padding: 12px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-subtle);
+      }
+      .detail-back-bar button {
+        font-size: 13px;
+        padding: 6px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .detail-back-bar button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .comment-detail {
+        padding: 20px 24px;
+      }
+      .comment-detail .cd-sub {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin: 0 0 14px;
+        word-break: break-all;
+      }
+      .comment-detail .cd-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .comment-detail .cd-line {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .comment-detail .cd-comment-text {
+        margin: 0;
+        padding: 14px 16px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .comment-detail .cd-hunk-title {
+        margin-top: 20px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+      }
+      .cd-note {
+        margin: 0 24px;
+        padding: 10px 12px;
+        font-size: 12px;
+        color: var(--chip-modify-fg);
+        background: var(--chip-modify);
+        border-radius: 6px;
+      }
+      /* Mark the comment's own lines within the rendered hunk. Inset border
+         instead of a background so it doesn't fight diff2html's add/del tints. */
+      .cd-hunk .d2h-code-side-line.cmt-hl {
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
 
-function maybeLoadMore() {
-  const list = document.getElementById("records-list");
-  const hasMore = state.rows.length < state.total;
-  const notScrollable = list.scrollHeight <= list.clientHeight;
-  if (hasMore && notScrollable) loadMoreRecords();
-}
+      /* generations */
+      .gen-badge {
+        font-size: 10px;
+        font-weight: 600;
+        color: #bc8cff;
+        background: rgba(163, 113, 247, 0.15);
+        border-radius: 10px;
+        padding: 1px 6px;
+        flex-shrink: 0;
+      }
+      .filter-row label.gen-filter.active {
+        background: #8957e5;
+        border-color: #8957e5;
+        color: #fff;
+      }
+      .gen-view-bar {
+        display: flex;
+        gap: 6px;
+        padding: 12px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-subtle);
+      }
+      .gen-view-bar button {
+        font-size: 12px;
+        padding: 5px 12px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        cursor: pointer;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .gen-view-bar button.active {
+        background: #8957e5;
+        border-color: #8957e5;
+        color: #fff;
+      }
+      .gen-view-panel {
+        flex: 1;
+        overflow: auto;
+      }
+      .gen-edit-block,
+      .gen-raw {
+        margin: 16px 24px;
+        padding: 16px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .gen-error-banner {
+        margin: 16px 24px;
+        padding: 16px;
+        background: rgba(248, 81, 73, 0.1);
+        border: 1px solid rgba(248, 81, 73, 0.4);
+        border-radius: 6px;
+        color: #f85149;
+        font-size: 13px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
 
-function appendGroupHeader(list, r) {
-  const repo = r.repo_name || "(no repo)";
-  const hash = r.commit_hash ? r.commit_hash.slice(0, 7) : "";
-  const header = document.createElement("li");
-  header.className = "group-header";
-  header.innerHTML = `
-    <span class="group-repo" title="${escapeHTML(repo)}">${escapeHTML(repo)}</span>
-    ${hash ? `<span class="group-hash">${escapeHTML(hash)}</span>` : ""}
-    <span class="group-count"></span>
+      /* diff2html tweaks */
+      .d2h-wrapper {
+        padding: 16px 24px;
+      }
+      .d2h-file-header {
+        display: none;
+      }
+      /* diff2html line numbers are position:absolute; without a positioned
+         ancestor they anchor to the viewport and stay fixed while .tab-panel
+         scrolls. Anchor them to the scrolling file wrapper instead. */
+      .d2h-file-wrapper {
+        position: relative;
+      }
+      .d2h-code-line,
+      .d2h-code-side-line {
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>Research Dashboard</h1>
+      <span class="meta" id="dataset-meta"></span>
+    </header>
+    <main>
+      <aside class="sidebar">
+        <div class="sidebar-controls">
+          <input
+            type="text"
+            id="search"
+            placeholder="Search filename / path / repo"
+          />
+          <div class="filter-row" id="change-type-filters"></div>
+          <div class="sidebar-count" id="sidebar-count"></div>
+        </div>
+        <ul class="records" id="records-list"></ul>
+      </aside>
+      <section class="detail">
+        <div class="detail-header" id="detail-header">
+          <div class="empty-state">Select a record from the list</div>
+        </div>
+        <div class="tabs" id="tabs" style="display: none"></div>
+        <div class="tab-panel" id="tab-panel"></div>
+      </section>
+    </main>
+
+    <script>
+      const TABS = [
+        { id: "diff", label: "Diff" },
+        { id: "cur", label: "Current" },
+        { id: "prev", label: "Previous" },
+        { id: "comments", label: "Comments" },
+        { id: "raw", label: "Raw JSON" },
+      ];
+
+      const PAGE_SIZE = 200;
+
+      const state = {
+        rows: [],
+        total: 0,
+        nextOffset: 0,
+        loading: false,
+        changeTypes: [],
+        search: "",
+        activeChangeTypes: new Set(),
+        genOnly: false,
+        selectedIndex: null,
+        currentRecord: null,
+        activeTab: "diff",
+        genView: "gendiff",
+        commentDetail: null,
+        repoKey: null,
+        repoCountEl: null,
+        repoCount: 0,
+        commitKey: null,
+        commitCountEl: null,
+        commitCount: 0,
+      };
+
+      async function loadMeta() {
+        const response = await fetch("/meta");
+        const meta = await response.json();
+        document.getElementById("dataset-meta").textContent =
+          `${meta.count} records across ${meta.repo_count} repos · ${meta.comment_count} comments (${meta.sidebar_comment_count} added/modified inline/block)`;
+        state.changeTypes = meta.change_types || [];
+        initChangeTypeFilters();
+        await reloadRecords();
+      }
+
+      function initChangeTypeFilters() {
+        state.activeChangeTypes = new Set(state.changeTypes);
+        const container = document.getElementById("change-type-filters");
+        container.innerHTML = "";
+
+        const genLabel = document.createElement("label");
+        genLabel.className = "gen-filter";
+        genLabel.textContent = "⚡ generated only";
+        genLabel.addEventListener("click", () => {
+          state.genOnly = !state.genOnly;
+          genLabel.classList.toggle("active", state.genOnly);
+          reloadRecords();
+        });
+        container.appendChild(genLabel);
+
+        for (const type of state.changeTypes) {
+          const label = document.createElement("label");
+          label.className = "active";
+          label.textContent = type;
+          label.dataset.type = type;
+          label.addEventListener("click", () => {
+            if (state.activeChangeTypes.has(type)) {
+              state.activeChangeTypes.delete(type);
+              label.classList.remove("active");
+            } else {
+              state.activeChangeTypes.add(type);
+              label.classList.add("active");
+            }
+            reloadRecords();
+          });
+          container.appendChild(label);
+        }
+      }
+
+      function recordsQuery(offset) {
+        const params = new URLSearchParams();
+        params.set("offset", String(offset));
+        params.set("limit", String(PAGE_SIZE));
+        const query = state.search.trim();
+        if (query) params.set("q", query);
+        if (state.activeChangeTypes.size !== state.changeTypes.length) {
+          params.set("types", Array.from(state.activeChangeTypes).join(","));
+        }
+        if (state.genOnly) params.set("gen", "1");
+        return params.toString();
+      }
+
+      async function reloadRecords() {
+        state.rows = [];
+        state.total = 0;
+        state.nextOffset = 0;
+        state.repoKey = null;
+        state.repoCountEl = null;
+        state.repoCount = 0;
+        state.commitKey = null;
+        state.commitCountEl = null;
+        state.commitCount = 0;
+        document.getElementById("records-list").innerHTML = "";
+        await loadMoreRecords();
+      }
+
+      async function loadMoreRecords() {
+        if (state.loading) return;
+        if (state.rows.length && state.rows.length >= state.total) return;
+        state.loading = true;
+        const response = await fetch(
+          `/records?${recordsQuery(state.nextOffset)}`,
+        );
+        const data = await response.json();
+        state.total = data.total;
+        state.nextOffset += data.rows.length;
+        appendRows(data.rows);
+        updateSidebarCount();
+        state.loading = false;
+        maybeLoadMore();
+      }
+
+      function maybeLoadMore() {
+        const list = document.getElementById("records-list");
+        const hasMore = state.rows.length < state.total;
+        const notScrollable = list.scrollHeight <= list.clientHeight;
+        if (hasMore && notScrollable) loadMoreRecords();
+      }
+
+      function appendRepoHeader(list, r) {
+        const repo = r.repo_name || "(no repo)";
+        const header = document.createElement("li");
+        header.className = "repo-header";
+        header.innerHTML = `
+    <span class="repo-name" title="${escapeHTML(repo)}">${escapeHTML(repo)}</span>
+    <span class="repo-count"></span>
   `;
-  list.appendChild(header);
-  state.groupCountEl = header.querySelector(".group-count");
-  state.groupCount = 0;
-}
+        list.appendChild(header);
+        state.repoCountEl = header.querySelector(".repo-count");
+        state.repoCount = 0;
+      }
 
-function appendRows(rows) {
-  const list = document.getElementById("records-list");
-  for (const r of rows) {
-    state.rows.push(r);
-    const idx = r.index;
-    const groupKey = `${r.repo_name || ""}@${r.commit_hash || ""}`;
-    if (groupKey !== state.groupKey) {
-      state.groupKey = groupKey;
-      appendGroupHeader(list, r);
-    }
-    state.groupCount += 1;
-    if (state.groupCountEl) {
-      state.groupCountEl.textContent =
-        `${state.groupCount} file${state.groupCount === 1 ? "" : "s"}`;
-    }
-    const li = document.createElement("li");
-    li.className = "record";
-    li.dataset.index = String(idx);
-    if (state.selectedIndex === idx) li.classList.add("selected");
+      function appendCommitHeader(list, r) {
+        const hash = r.commit_hash ? r.commit_hash.slice(0, 7) : "(no commit)";
+        const header = document.createElement("li");
+        header.className = "commit-header";
+        header.innerHTML = `
+    <span class="commit-hash">${escapeHTML(hash)}</span>
+    <span class="commit-count"></span>
+  `;
+        list.appendChild(header);
+        state.commitCountEl = header.querySelector(".commit-count");
+        state.commitCount = 0;
+      }
 
-    const row1 = document.createElement("div");
-    row1.className = "row1";
-    const chip = document.createElement("span");
-    chip.className = "chip " + (r.change_type || "");
-    chip.textContent = r.change_type || "?";
-    const name = document.createElement("span");
-    name.className = "filename";
-    name.textContent = r.new_path || r.filename || `#${idx}`;
-    name.title = r.new_path || r.filename || "";
-    const nloc = document.createElement("span");
-    nloc.className = "nloc";
-    nloc.textContent = r.nloc != null ? `${r.nloc} loc` : "";
-    row1.append(chip, name, nloc);
-    if (r.generation_count != null) {
-      const gen = document.createElement("span");
-      gen.className = "gen-badge";
-      gen.textContent = `⚡${r.generation_count}`;
-      gen.title = `${r.generation_count} generation(s)`;
-      row1.appendChild(gen);
-    }
+      function fileLabel(count) {
+        return `${count} file${count === 1 ? "" : "s"}`;
+      }
 
-    li.append(row1);
-    li.addEventListener("click", () => selectRecord(idx));
-    list.appendChild(li);
-  }
-}
+      function appendRows(rows) {
+        const list = document.getElementById("records-list");
+        for (const r of rows) {
+          state.rows.push(r);
+          const idx = r.index;
+          const repoKey = r.repo_name || "";
+          const commitKey = `${repoKey}@${r.commit_hash || ""}`;
+          if (repoKey !== state.repoKey) {
+            state.repoKey = repoKey;
+            state.commitKey = null;
+            appendRepoHeader(list, r);
+          }
+          if (commitKey !== state.commitKey) {
+            state.commitKey = commitKey;
+            appendCommitHeader(list, r);
+          }
+          state.repoCount += 1;
+          if (state.repoCountEl) {
+            state.repoCountEl.textContent = fileLabel(state.repoCount);
+          }
+          state.commitCount += 1;
+          if (state.commitCountEl) {
+            state.commitCountEl.textContent = fileLabel(state.commitCount);
+          }
+          const li = document.createElement("li");
+          li.className = "record";
+          li.dataset.index = String(idx);
+          if (state.selectedIndex === idx) li.classList.add("selected");
 
-function markSelection() {
-  for (const li of document.querySelectorAll("#records-list li.record")) {
-    li.classList.toggle("selected", Number(li.dataset.index) === state.selectedIndex);
-  }
-}
+          const row1 = document.createElement("div");
+          row1.className = "row1";
+          const chip = document.createElement("span");
+          chip.className = "chip " + (r.change_type || "");
+          chip.textContent = r.change_type || "?";
+          const name = document.createElement("span");
+          name.className = "filename";
+          name.textContent = r.new_path || r.filename || `#${idx}`;
+          name.title = r.new_path || r.filename || "";
+          const nloc = document.createElement("span");
+          nloc.className = "nloc";
+          nloc.textContent = r.nloc != null ? `${r.nloc} loc` : "";
+          row1.append(chip, name, nloc);
+          if (r.generation_count != null) {
+            const gen = document.createElement("span");
+            gen.className = "gen-badge";
+            gen.textContent = `⚡${r.generation_count}`;
+            gen.title = `${r.generation_count} generation(s)`;
+            row1.appendChild(gen);
+          }
 
-function updateSidebarCount() {
-  document.getElementById("sidebar-count").textContent =
-    `${state.rows.length} of ${state.total} matching`;
-}
+          li.append(row1);
+          const comments = r.sidebar_comments || [];
+          if (comments.length) {
+            li.appendChild(buildRecordComments(idx, comments));
+          }
+          li.addEventListener("click", () => selectRecord(idx));
+          list.appendChild(li);
+        }
+      }
 
-async function selectRecord(index) {
-  state.selectedIndex = index;
-  markSelection();
-  const response = await fetch(`/records/${index}`);
-  state.currentRecord = await response.json();
-  const genCount = (state.currentRecord.generations || []).length;
-  if (state.activeTab.startsWith("gen:") && Number(state.activeTab.slice(4)) >= genCount) {
-    state.activeTab = "diff";
-  }
-  renderDetailHeader();
-  renderTabs();
-  renderActiveTab();
-}
+      function buildRecordComments(idx, comments) {
+        const container = document.createElement("div");
+        container.className = "record-comments";
+        comments.forEach((c, filteredIndex) => {
+          const item = document.createElement("div");
+          item.className = "record-comment";
 
-function generationTabs(record) {
-  const seen = {};
-  return (record.generations || []).map((g, i) => {
-    const short = (g.model || `gen ${i + 1}`).split("/").pop();
-    seen[short] = (seen[short] || 0) + 1;
-    const label = seen[short] > 1 ? `${short} #${seen[short]}` : short;
-    const icon = g.error ? "⚠️" : "⚡";
-    return { id: `gen:${i}`, label: `${icon} ${label}` };
-  });
-}
+          const meta = document.createElement("div");
+          meta.className = "rc-meta";
+          const typeChip = document.createElement("span");
+          typeChip.className = "comment-type-chip " + (c.type || "");
+          typeChip.textContent = c.type || "";
+          const statusPill = document.createElement("span");
+          statusPill.className = "status-pill " + (c.status || "");
+          statusPill.textContent = c.status || "";
+          const line = document.createElement("span");
+          line.className = "rc-line";
+          line.textContent =
+            c.start_line === c.end_line
+              ? `L${c.start_line}`
+              : `L${c.start_line}-${c.end_line}`;
+          meta.append(typeChip, statusPill, line);
 
-function renderDetailHeader() {
-  const r = state.currentRecord;
-  const header = document.getElementById("detail-header");
-  const hashShort = r.commit_hash ? r.commit_hash.slice(0, 7) : "";
-  header.innerHTML = `
+          const text = document.createElement("div");
+          text.className = "rc-text";
+          text.textContent = c.comment || "";
+          text.title = c.comment || "";
+
+          item.append(meta, text);
+          item.addEventListener("click", (event) => {
+            event.stopPropagation();
+            openRecordCommentDetail(idx, filteredIndex);
+          });
+          container.appendChild(item);
+        });
+        return container;
+      }
+
+      function markSelection() {
+        for (const li of document.querySelectorAll("#records-list li.record")) {
+          li.classList.toggle(
+            "selected",
+            Number(li.dataset.index) === state.selectedIndex,
+          );
+        }
+      }
+
+      function updateSidebarCount() {
+        document.getElementById("sidebar-count").textContent =
+          `${state.rows.length} of ${state.total} matching`;
+      }
+
+      async function loadRecord(index) {
+        if (state.selectedIndex === index && state.currentRecord) return;
+        state.selectedIndex = index;
+        markSelection();
+        const response = await fetch(`/records/${index}`);
+        state.currentRecord = await response.json();
+      }
+
+      async function selectRecord(index) {
+        state.commentDetail = null;
+        await loadRecord(index);
+        const genCount = (state.currentRecord.generations || []).length;
+        if (
+          state.activeTab.startsWith("gen:") &&
+          Number(state.activeTab.slice(4)) >= genCount
+        ) {
+          state.activeTab = "diff";
+        }
+        renderDetailHeader();
+        renderTabs();
+        renderActiveTab();
+      }
+
+      async function openRecordCommentDetail(index, filteredIndex) {
+        await loadRecord(index);
+        state.activeTab = "comments";
+        state.commentDetail = { kind: "record", genIndex: null, filteredIndex };
+        renderDetailHeader();
+        renderTabs();
+        renderActiveTab();
+      }
+
+      function openGenCommentDetail(genIndex, filteredIndex) {
+        state.commentDetail = { kind: "gen", genIndex, filteredIndex };
+        renderActiveTab();
+      }
+
+      function generationTabs(record) {
+        const seen = {};
+        return (record.generations || []).map((g, i) => {
+          const short = (g.model || `gen ${i + 1}`).split("/").pop();
+          seen[short] = (seen[short] || 0) + 1;
+          const label = seen[short] > 1 ? `${short} #${seen[short]}` : short;
+          const icon = g.error ? "⚠️" : "⚡";
+          return { id: `gen:${i}`, label: `${icon} ${label}` };
+        });
+      }
+
+      function renderDetailHeader() {
+        const r = state.currentRecord;
+        const header = document.getElementById("detail-header");
+        const hashShort = r.commit_hash ? r.commit_hash.slice(0, 7) : "";
+        header.innerHTML = `
     <div class="detail-title">${escapeHTML(r.new_path || r.filename || "")}</div>
     <div class="detail-sub">
       ${escapeHTML(r.repo_name || "(no repo)")}${hashShort ? " @ " + escapeHTML(hashShort) : ""}
@@ -665,200 +1035,240 @@ function renderDetailHeader() {
       <span class="badge">${(r.comments || []).length} comments</span>
     </div>
   `;
-}
-
-function renderTabs() {
-  const tabs = document.getElementById("tabs");
-  tabs.style.display = "flex";
-  tabs.innerHTML = "";
-  const allTabs = TABS.concat(generationTabs(state.currentRecord || {}));
-  for (const tab of allTabs) {
-    const button = document.createElement("button");
-    button.textContent = tab.label;
-    if (tab.id === state.activeTab) button.classList.add("active");
-    button.addEventListener("click", () => {
-      state.activeTab = tab.id;
-      renderTabs();
-      renderActiveTab();
-    });
-    tabs.appendChild(button);
-  }
-}
-
-function renderActiveTab() {
-  const panel = document.getElementById("tab-panel");
-  panel.innerHTML = "";
-  const r = state.currentRecord;
-  if (!r) return;
-
-  if (state.activeTab.startsWith("gen:")) {
-    const generation = (r.generations || [])[Number(state.activeTab.slice(4))];
-    if (generation) return renderGeneration(panel, generation);
-  }
-
-  switch (state.activeTab) {
-    case "diff":     return renderDiff(panel, r);
-    case "cur":      return renderCode(panel, r.source_code, r.comments || []);
-    case "prev":     return renderCode(panel, r.previous_source_code, []);
-    case "curnc":    return renderCode(panel, r.source_code_without_comments, []);
-    case "prevnc":   return renderCode(panel, r.previous_source_code_without_comments, []);
-    case "comments": return renderComments(panel, r.comments || []);
-    case "raw":      return renderRaw(panel, r);
-  }
-}
-
-const GEN_VIEWS = [
-  { id: "gendiff",     label: "Diff vs human file" },
-  { id: "gencontent",  label: "Generated content" },
-  { id: "gencomments", label: "Generated comments" },
-  { id: "genedits",    label: "Raw edits" },
-  { id: "genraw",      label: "Raw response" },
-];
-
-function renderGeneration(panel, generation) {
-  if (generation.error) {
-    const banner = document.createElement("div");
-    banner.className = "gen-error-banner";
-    banner.textContent = `⚠️ Generation failed: ${generation.error}`;
-    panel.appendChild(banner);
-  }
-
-  const bar = document.createElement("div");
-  bar.className = "gen-view-bar";
-  for (const view of GEN_VIEWS) {
-    const button = document.createElement("button");
-    button.textContent = view.label;
-    if (view.id === state.genView) button.classList.add("active");
-    button.addEventListener("click", () => {
-      state.genView = view.id;
-      renderActiveTab();
-    });
-    bar.appendChild(button);
-  }
-  panel.appendChild(bar);
-
-  const sub = document.createElement("div");
-  sub.className = "gen-view-panel";
-  panel.appendChild(sub);
-
-  switch (state.genView) {
-    case "gendiff": {
-      if (!generation.diff_vs_source) {
-        sub.innerHTML = `<div class="empty-state">Generation is identical to the human file.</div>`;
-        return;
       }
-      const r = state.currentRecord;
-      const fakePath = r.new_path || r.filename || "file.py";
-      const unified = `diff --git a/${fakePath} b/${fakePath}\n` + generation.diff_vs_source;
-      const ui = new Diff2HtmlUI(sub, unified, {
-        drawFileList: false,
-        matching: "lines",
-        outputFormat: "side-by-side",
-        highlight: true,
-      });
-      ui.draw();
-      ui.highlightCode();
-      return;
-    }
-    case "gencontent":
-      return renderCode(sub, generation.generated_content, generation.generated_comments || []);
-    case "gencomments":
-      return renderComments(sub, generation.generated_comments || []);
-    case "genedits": {
-      const edits = generation.generated_edits || [];
-      if (!edits.length) {
-        sub.innerHTML = `<div class="empty-state">No edit blocks recorded.</div>`;
-        return;
-      }
-      for (const edit of edits) {
-        const pre = document.createElement("pre");
-        pre.className = "gen-edit-block";
-        pre.textContent =
-          "<<<<<<< SEARCH\n" + edit.search + "\n=======\n" + edit.replace + "\n>>>>>>> REPLACE";
-        sub.appendChild(pre);
-      }
-      return;
-    }
-    case "genraw": {
-      if (!generation.raw_response) {
-        sub.innerHTML = `<div class="empty-state">No raw response recorded.</div>`;
-        return;
-      }
-      const pre = document.createElement("pre");
-      pre.className = "gen-raw";
-      pre.textContent = generation.raw_response;
-      sub.appendChild(pre);
-      return;
-    }
-  }
-}
 
-function renderDiff(panel, record) {
-  if (!record.diff) {
-    panel.innerHTML = `<div class="empty-state">No diff available.</div>`;
-    return;
-  }
-  const fakePath = record.new_path || record.filename || "file.py";
-  const unified =
-    `diff --git a/${fakePath} b/${fakePath}\n` +
-    `--- a/${fakePath}\n+++ b/${fakePath}\n` +
-    record.diff;
-  const ui = new Diff2HtmlUI(panel, unified, {
-    drawFileList: false,
-    matching: "lines",
-    outputFormat: "side-by-side",
-    highlight: true,
-  });
-  ui.draw();
-  ui.highlightCode();
-}
+      function renderTabs() {
+        const tabs = document.getElementById("tabs");
+        tabs.style.display = "flex";
+        tabs.innerHTML = "";
+        const allTabs = TABS.concat(generationTabs(state.currentRecord || {}));
+        for (const tab of allTabs) {
+          const button = document.createElement("button");
+          button.textContent = tab.label;
+          if (tab.id === state.activeTab) button.classList.add("active");
+          button.addEventListener("click", () => {
+            state.activeTab = tab.id;
+            state.commentDetail = null;
+            renderTabs();
+            renderActiveTab();
+          });
+          tabs.appendChild(button);
+        }
+      }
 
-function renderCode(panel, code, comments) {
-  if (code == null) {
-    panel.innerHTML = `<div class="empty-state">No content for this variant.</div>`;
-    return;
-  }
-  const commentLineSet = new Set();
-  for (const c of comments) {
-    const start = c.start_line ?? 0;
-    const end = c.end_line ?? start;
-    for (let l = start; l <= end; l++) commentLineSet.add(l);
-  }
-  const wrap = document.createElement("div");
-  wrap.className = "code-wrap";
-  const lines = code.split("\n");
-  let highlighted;
-  try {
-    highlighted = hljs.highlight(code, { language: "python", ignoreIllegals: true }).value;
-  } catch {
-    highlighted = escapeHTML(code);
-  }
-  const highlightedLines = highlighted.split("\n");
-  const frag = document.createDocumentFragment();
-  for (let i = 0; i < lines.length; i++) {
-    const lineNumber = i + 1;
-    const row = document.createElement("div");
-    row.className = "code-line";
-    if (commentLineSet.has(lineNumber)) row.classList.add("has-comment");
-    row.innerHTML = `
+      function renderActiveTab() {
+        const panel = document.getElementById("tab-panel");
+        panel.innerHTML = "";
+        const r = state.currentRecord;
+        if (!r) return;
+
+        if (state.commentDetail) return renderCommentDetail(panel);
+
+        if (state.activeTab.startsWith("gen:")) {
+          const generation = (r.generations || [])[
+            Number(state.activeTab.slice(4))
+          ];
+          if (generation) return renderGeneration(panel, generation);
+        }
+
+        switch (state.activeTab) {
+          case "diff":
+            return renderDiff(panel, r);
+          case "cur":
+            return renderCode(panel, r.source_code, r.comments || []);
+          case "prev":
+            return renderCode(panel, r.previous_source_code, []);
+          case "comments":
+            return renderComments(panel, r.comments || [], { kind: "record" });
+          case "raw":
+            return renderRaw(panel, r);
+        }
+      }
+
+      const GEN_VIEWS = [
+        { id: "gendiff", label: "Diff vs human file" },
+        { id: "gencontent", label: "Generated content" },
+        { id: "gencomments", label: "Generated comments" },
+        { id: "genedits", label: "Raw edits" },
+        { id: "genraw", label: "Raw response" },
+      ];
+
+      function renderGeneration(panel, generation) {
+        if (generation.error) {
+          const banner = document.createElement("div");
+          banner.className = "gen-error-banner";
+          banner.textContent = `⚠️ Generation failed: ${generation.error}`;
+          panel.appendChild(banner);
+        }
+
+        const bar = document.createElement("div");
+        bar.className = "gen-view-bar";
+        for (const view of GEN_VIEWS) {
+          const button = document.createElement("button");
+          button.textContent = view.label;
+          if (view.id === state.genView) button.classList.add("active");
+          button.addEventListener("click", () => {
+            state.genView = view.id;
+            renderActiveTab();
+          });
+          bar.appendChild(button);
+        }
+        panel.appendChild(bar);
+
+        const sub = document.createElement("div");
+        sub.className = "gen-view-panel";
+        panel.appendChild(sub);
+
+        switch (state.genView) {
+          case "gendiff": {
+            if (!generation.diff_vs_source) {
+              sub.innerHTML = `<div class="empty-state">Generation is identical to the human file.</div>`;
+              return;
+            }
+            const r = state.currentRecord;
+            const fakePath = r.new_path || r.filename || "file.py";
+            const unified =
+              `diff --git a/${fakePath} b/${fakePath}\n` +
+              generation.diff_vs_source;
+            const ui = new Diff2HtmlUI(sub, unified, {
+              drawFileList: false,
+              matching: "lines",
+              outputFormat: "side-by-side",
+              highlight: true,
+              colorScheme: "dark",
+            });
+            ui.draw();
+            ui.highlightCode();
+            return;
+          }
+          case "gencontent":
+            return renderCode(
+              sub,
+              generation.generated_content,
+              generation.generated_comments || [],
+            );
+          case "gencomments":
+            return renderComments(sub, generation.generated_comments || [], {
+              kind: "gen",
+              genIndex: Number(state.activeTab.slice(4)),
+            });
+          case "genedits": {
+            const edits = generation.generated_edits || [];
+            if (!edits.length) {
+              sub.innerHTML = `<div class="empty-state">No edit blocks recorded.</div>`;
+              return;
+            }
+            for (const edit of edits) {
+              const pre = document.createElement("pre");
+              pre.className = "gen-edit-block";
+              pre.textContent =
+                "<<<<<<< SEARCH\n" +
+                edit.search +
+                "\n=======\n" +
+                edit.replace +
+                "\n>>>>>>> REPLACE";
+              sub.appendChild(pre);
+            }
+            return;
+          }
+          case "genraw": {
+            if (!generation.raw_response) {
+              sub.innerHTML = `<div class="empty-state">No raw response recorded.</div>`;
+              return;
+            }
+            const pre = document.createElement("pre");
+            pre.className = "gen-raw";
+            pre.textContent = generation.raw_response;
+            sub.appendChild(pre);
+            return;
+          }
+        }
+      }
+
+      function renderDiff(panel, record) {
+        if (!record.diff) {
+          panel.innerHTML = `<div class="empty-state">No diff available.</div>`;
+          return;
+        }
+        const fakePath = record.new_path || record.filename || "file.py";
+        const unified =
+          `diff --git a/${fakePath} b/${fakePath}\n` +
+          `--- a/${fakePath}\n+++ b/${fakePath}\n` +
+          record.diff;
+        const ui = new Diff2HtmlUI(panel, unified, {
+          drawFileList: false,
+          matching: "lines",
+          outputFormat: "side-by-side",
+          highlight: true,
+          colorScheme: "dark",
+        });
+        ui.draw();
+        ui.highlightCode();
+      }
+
+      function renderCode(panel, code, comments) {
+        if (code == null) {
+          panel.innerHTML = `<div class="empty-state">No content for this variant.</div>`;
+          return;
+        }
+        const commentLineSet = new Set();
+        for (const c of comments) {
+          const start = c.start_line ?? 0;
+          const end = c.end_line ?? start;
+          for (let l = start; l <= end; l++) commentLineSet.add(l);
+        }
+        const wrap = document.createElement("div");
+        wrap.className = "code-wrap";
+        const lines = code.split("\n");
+        let highlighted;
+        try {
+          highlighted = hljs.highlight(code, {
+            language: "python",
+            ignoreIllegals: true,
+          }).value;
+        } catch {
+          highlighted = escapeHTML(code);
+        }
+        const highlightedLines = highlighted.split("\n");
+        const frag = document.createDocumentFragment();
+        for (let i = 0; i < lines.length; i++) {
+          const lineNumber = i + 1;
+          const row = document.createElement("div");
+          row.className = "code-line";
+          if (commentLineSet.has(lineNumber)) row.classList.add("has-comment");
+          row.innerHTML = `
       <span class="lineno">${lineNumber}</span>
       <span class="marker" title="${commentLineSet.has(lineNumber) ? "comment" : ""}"></span>
       <span class="content hljs">${highlightedLines[i] ?? ""}</span>
     `;
-    frag.appendChild(row);
-  }
-  wrap.appendChild(frag);
-  panel.appendChild(wrap);
-}
+          frag.appendChild(row);
+        }
+        wrap.appendChild(frag);
+        panel.appendChild(wrap);
+      }
 
-function renderComments(panel, comments) {
-  if (!comments.length) {
-    panel.innerHTML = `<div class="empty-state">No comments on this record.</div>`;
-    return;
-  }
-  const table = document.createElement("table");
-  table.className = "comments-table";
-  table.innerHTML = `
+      const COMMENT_TYPES = new Set(["inline", "block"]);
+      const COMMENT_STATUSES = new Set(["added", "modified"]);
+
+      function filterDetailComments(comments) {
+        return (comments || []).filter(
+          (c) =>
+            COMMENT_TYPES.has(c.type || "") &&
+            COMMENT_STATUSES.has(c.status || ""),
+        );
+      }
+
+      function renderComments(panel, comments, context) {
+        const visible = filterDetailComments(comments);
+        if (!visible.length) {
+          panel.innerHTML = `<div class="empty-state">No added or modified inline/block comments on this record.</div>`;
+          return;
+        }
+
+        const table = document.createElement("table");
+        table.className = "comments-table";
+        if (context) table.classList.add("clickable");
+        table.innerHTML = `
     <thead>
       <tr>
         <th style="width:90px;">Type</th>
@@ -870,64 +1280,244 @@ function renderComments(panel, comments) {
     </thead>
     <tbody></tbody>
   `;
-  const tbody = table.querySelector("tbody");
-  for (const c of comments) {
-    const tr = document.createElement("tr");
-    const type = c.type || "";
-    const status = c.status || "";
-    const lines =
-      c.start_line === c.end_line
-        ? `${c.start_line}`
-        : `${c.start_line}-${c.end_line}`;
-    const anchorText = c.anchor == null ? "" : c.anchor;
-    const anchorHTML = anchorText
-      ? `<code class="anchor-code">${escapeHTML(anchorText)}</code>`
-      : `<span class="anchor-empty">—</span>`;
-    tr.innerHTML = `
-      <td><span class="comment-type-chip ${escapeHTML(type)}">${escapeHTML(type)}</span></td>
-      <td>${escapeHTML(status)}</td>
-      <td>${escapeHTML(lines)}</td>
-      <td class="comment-text">${escapeHTML(c.comment ?? "")}</td>
-      <td class="comment-anchor">${anchorHTML}</td>
-    `;
-    tbody.appendChild(tr);
-  }
-  panel.appendChild(table);
-}
+        const tbody = table.querySelector("tbody");
+        visible.forEach((c, filteredIndex) => {
+          const tr = document.createElement("tr");
+          const type = c.type || "";
+          const status = c.status || "";
+          const lines =
+            c.start_line === c.end_line
+              ? `${c.start_line}`
+              : `${c.start_line}-${c.end_line}`;
+          const anchorText = c.anchor == null ? "" : c.anchor;
+          const anchorHTML = anchorText
+            ? `<code class="anchor-code">${escapeHTML(anchorText)}</code>`
+            : `<span class="anchor-empty">—</span>`;
+          tr.innerHTML = `
+        <td><span class="comment-type-chip ${escapeHTML(type)}">${escapeHTML(type)}</span></td>
+        <td><span class="status-pill ${escapeHTML(status)}">${escapeHTML(status)}</span></td>
+        <td>${escapeHTML(lines)}</td>
+        <td class="comment-text">${escapeHTML(c.comment ?? "")}</td>
+        <td class="comment-anchor">${anchorHTML}</td>
+      `;
+          if (context) {
+            tr.addEventListener("click", () => {
+              if (context.kind === "gen") {
+                openGenCommentDetail(context.genIndex, filteredIndex);
+              } else {
+                openRecordCommentDetail(state.selectedIndex, filteredIndex);
+              }
+            });
+          }
+          tbody.appendChild(tr);
+        });
+        panel.appendChild(table);
+      }
 
-function renderRaw(panel, record) {
-  const pre = document.createElement("pre");
-  pre.style.padding = "12px 16px";
-  pre.style.fontSize = "11px";
-  pre.style.whiteSpace = "pre-wrap";
-  pre.style.wordBreak = "break-word";
-  pre.textContent = JSON.stringify(record, null, 2);
-  panel.appendChild(pre);
-}
+      function parseDiffHunks(diffText) {
+        const hunks = [];
+        const headerRe = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/;
+        let current = null;
+        for (const line of (diffText || "").split("\n")) {
+          const match = line.match(headerRe);
+          if (match) {
+            const newStart = parseInt(match[1], 10);
+            const newCount = match[2] === undefined ? 1 : parseInt(match[2], 10);
+            current = {
+              newStart,
+              newEnd: newStart + Math.max(newCount, 1) - 1,
+              lines: [line],
+            };
+            hunks.push(current);
+          } else if (current) {
+            current.lines.push(line);
+          }
+        }
+        return hunks;
+      }
 
-function escapeHTML(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+      function buildHunkDiff(path, hunks) {
+        const header =
+          `diff --git a/${path} b/${path}\n` +
+          `--- a/${path}\n` +
+          `+++ b/${path}\n`;
+        return header + hunks.map((h) => h.lines.join("\n")).join("\n") + "\n";
+      }
 
-let searchTimer = null;
-document.getElementById("search").addEventListener("input", (event) => {
-  state.search = event.target.value;
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(reloadRecords, 200);
-});
+      function highlightCommentLines(container, comment) {
+        const sides = container.querySelectorAll(".d2h-file-side-diff");
+        const newSide = sides[sides.length - 1];
+        if (!newSide) return;
+        for (const row of newSide.querySelectorAll("tr")) {
+          const numCell = row.querySelector(".d2h-code-side-linenumber");
+          const codeCell = row.querySelector(".d2h-code-side-line");
+          if (!numCell || !codeCell) continue;
+          const n = parseInt(numCell.textContent.trim(), 10);
+          if (n >= comment.start_line && n <= comment.end_line) {
+            codeCell.classList.add("cmt-hl");
+          }
+        }
+      }
 
-document.getElementById("records-list").addEventListener("scroll", (event) => {
-  const list = event.target;
-  if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) {
-    loadMoreRecords();
-  }
-});
+      function renderCommentDetail(panel) {
+        const record = state.currentRecord;
+        const detail = state.commentDetail;
+        let comments;
+        let diffText;
+        let backLabel;
+        let model = null;
+        if (detail.kind === "gen") {
+          const generation = (record.generations || [])[detail.genIndex];
+          comments = filterDetailComments(
+            (generation && generation.generated_comments) || [],
+          );
+          diffText = (generation && generation.diff_vs_source) || "";
+          backLabel = "← Back to generated comments";
+          model = generation && generation.model;
+        } else {
+          comments = filterDetailComments(record.comments || []);
+          diffText = record.diff || "";
+          backLabel = "← Back to comments";
+        }
+        const comment = comments[detail.filteredIndex];
 
-loadMeta();
-</script>
-</body>
+        const backBar = document.createElement("div");
+        backBar.className = "detail-back-bar";
+        const backButton = document.createElement("button");
+        backButton.textContent = backLabel;
+        backButton.addEventListener("click", () => {
+          state.commentDetail = null;
+          renderActiveTab();
+        });
+        backBar.appendChild(backButton);
+        panel.appendChild(backBar);
+
+        if (!comment) {
+          const empty = document.createElement("div");
+          empty.className = "empty-state";
+          empty.textContent = "This comment is no longer available.";
+          panel.appendChild(empty);
+          return;
+        }
+
+        const path = record.new_path || record.filename || "file.py";
+        const lines =
+          comment.start_line === comment.end_line
+            ? `L${comment.start_line}`
+            : `L${comment.start_line}-${comment.end_line}`;
+        const anchorHTML =
+          comment.anchor == null || comment.anchor === ""
+            ? ""
+            : `<code class="anchor-code">${escapeHTML(comment.anchor)}</code>`;
+
+        const body = document.createElement("div");
+        body.className = "comment-detail";
+        body.innerHTML = `
+    ${model ? `<div class="cd-sub">${escapeHTML(model)}</div>` : ""}
+    <div class="cd-meta">
+      <span class="comment-type-chip ${escapeHTML(comment.type || "")}">${escapeHTML(comment.type || "")}</span>
+      <span class="status-pill ${escapeHTML(comment.status || "")}">${escapeHTML(comment.status || "")}</span>
+      <span class="cd-line">${escapeHTML(lines)}</span>
+      ${anchorHTML}
+    </div>
+    <pre class="cd-comment-text"></pre>
+    <div class="cd-hunk-title">Diff hunk</div>
+  `;
+        body.querySelector(".cd-comment-text").textContent = comment.comment || "";
+        panel.appendChild(body);
+
+        const hunkArea = document.createElement("div");
+        hunkArea.className = "cd-hunk";
+        panel.appendChild(hunkArea);
+
+        if (!diffText.trim()) {
+          hunkArea.innerHTML = `<div class="empty-state">No diff available for this comment's file.</div>`;
+          return;
+        }
+
+        const allHunks = parseDiffHunks(diffText);
+        const overlapping = allHunks.filter(
+          (h) =>
+            h.newStart <= comment.end_line && h.newEnd >= comment.start_line,
+        );
+        let hunks = overlapping;
+        if (!overlapping.length) {
+          const note = document.createElement("div");
+          note.className = "cd-note";
+          note.textContent =
+            "Couldn't isolate a specific hunk for this comment; showing the full diff.";
+          hunkArea.appendChild(note);
+          hunks = allHunks;
+        }
+        if (!hunks.length) {
+          hunkArea.innerHTML = `<div class="empty-state">No diff available for this comment's file.</div>`;
+          return;
+        }
+
+        const diffContainer = document.createElement("div");
+        hunkArea.appendChild(diffContainer);
+        const ui = new Diff2HtmlUI(diffContainer, buildHunkDiff(path, hunks), {
+          drawFileList: false,
+          matching: "lines",
+          outputFormat: "side-by-side",
+          highlight: true,
+          colorScheme: "dark",
+        });
+        ui.draw();
+        ui.highlightCode();
+        highlightCommentLines(diffContainer, comment);
+      }
+
+      function renderRaw(panel, record) {
+        const json = JSON.stringify(record, null, 2);
+        const pre = document.createElement("pre");
+        pre.style.margin = "0";
+        pre.style.padding = "20px 24px";
+        pre.style.fontSize = "12px";
+        pre.style.lineHeight = "1.6";
+        pre.style.whiteSpace = "pre-wrap";
+        pre.style.wordBreak = "break-word";
+        const code = document.createElement("code");
+        code.className = "hljs language-json";
+        code.style.padding = "0";
+        code.style.background = "transparent";
+        try {
+          code.innerHTML = hljs.highlight(json, {
+            language: "json",
+            ignoreIllegals: true,
+          }).value;
+        } catch {
+          code.textContent = json;
+        }
+        pre.appendChild(code);
+        panel.appendChild(pre);
+      }
+
+      function escapeHTML(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      let searchTimer = null;
+      document.getElementById("search").addEventListener("input", (event) => {
+        state.search = event.target.value;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(reloadRecords, 200);
+      });
+
+      document
+        .getElementById("records-list")
+        .addEventListener("scroll", (event) => {
+          const list = event.target;
+          if (list.scrollTop + list.clientHeight >= list.scrollHeight - 200) {
+            loadMoreRecords();
+          }
+        });
+
+      loadMeta();
+    </script>
+  </body>
 </html>

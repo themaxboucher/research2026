@@ -18,6 +18,9 @@ DASHBOARD_HTML = Path(__file__).parent / "dashboard.html"
 DEFAULT_PAGE_LIMIT = 200
 MAX_PAGE_LIMIT = 1000
 
+# Bump when the cached index schema changes so stale caches are rebuilt.
+INDEX_VERSION = 3
+
 SIDEBAR_FIELDS = (
     "repo_name",
     "commit_hash",
@@ -29,7 +32,28 @@ SIDEBAR_FIELDS = (
     "deleted_lines",
 )
 
-META_FIELDS = ("count", "repo_count", "comment_count", "change_types")
+# Comments surfaced inline under each file in the sidebar.
+SIDEBAR_COMMENT_TYPES = {"inline", "block"}
+SIDEBAR_COMMENT_STATUSES = {"added", "modified"}
+SIDEBAR_COMMENT_FIELDS = ("type", "status", "start_line", "end_line", "comment")
+
+META_FIELDS = (
+    "count",
+    "repo_count",
+    "comment_count",
+    "sidebar_comment_count",
+    "change_types",
+)
+
+
+def _sidebar_comments(record: dict) -> list[dict]:
+    """The added/modified inline/block comments shown under a file in the sidebar."""
+    return [
+        {field: comment.get(field) for field in SIDEBAR_COMMENT_FIELDS}
+        for comment in (record.get("comments") or [])
+        if comment.get("type") in SIDEBAR_COMMENT_TYPES
+        and comment.get("status") in SIDEBAR_COMMENT_STATUSES
+    ]
 
 
 def _index_paths(run_dir: Path, dataset: str) -> tuple[Path, Path]:
@@ -46,6 +70,7 @@ def _build_index(source_path: Path) -> tuple[list[dict], dict]:
     repos: set[str] = set()
     change_types: set[str] = set()
     comment_total = 0
+    sidebar_comment_total = 0
     offset = 0
 
     with source_path.open("rb") as source_file:
@@ -69,6 +94,8 @@ def _build_index(source_path: Path) -> tuple[list[dict], dict]:
             for field in SIDEBAR_FIELDS:
                 entry[field] = record.get(field)
             entry["comment_count"] = len(record.get("comments") or [])
+            entry["sidebar_comments"] = _sidebar_comments(record)
+            sidebar_comment_total += len(entry["sidebar_comments"])
             if "generations" in record:
                 entry["generation_count"] = len(record["generations"] or [])
             sidebar.append(entry)
@@ -83,6 +110,7 @@ def _build_index(source_path: Path) -> tuple[list[dict], dict]:
         "count": len(sidebar),
         "repo_count": len(repos),
         "comment_count": comment_total,
+        "sidebar_comment_count": sidebar_comment_total,
         "change_types": sorted(change_types),
     }
     return sidebar, meta
@@ -97,6 +125,7 @@ def _write_cache(
 
     meta_out = {field: meta[field] for field in META_FIELDS}
     meta_out["source"] = {"size": stat.st_size, "mtime": stat.st_mtime}
+    meta_out["version"] = INDEX_VERSION
     meta_path.write_text(json.dumps(meta_out), encoding="utf-8")
 
 
@@ -106,6 +135,8 @@ def _load_valid_cache(source_path: Path, dataset: str) -> tuple[list[dict], dict
         return None
 
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    if meta.get("version") != INDEX_VERSION:
+        return None
     stat = source_path.stat()
     source = meta.get("source", {})
     if source.get("size") != stat.st_size or source.get("mtime") != stat.st_mtime:
