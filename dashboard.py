@@ -19,7 +19,7 @@ DEFAULT_PAGE_LIMIT = 200
 MAX_PAGE_LIMIT = 1000
 
 # Bump when the cached index schema changes so stale caches are rebuilt.
-INDEX_VERSION = 3
+INDEX_VERSION = 5
 
 SIDEBAR_FIELDS = (
     "repo_name",
@@ -46,14 +46,40 @@ META_FIELDS = (
 )
 
 
+def _comment_generation_count(record: dict, comment: dict) -> int | None:
+    """Number of model generations produced for `comment`, or None if the record
+    holds no generation for it. Generations are matched to a comment by their
+    target fields (newer records flatten them onto the generation; older ones
+    nest them under a `target` key)."""
+    generations = record.get("comment_generations")
+    if not generations:
+        return None
+    for generation in generations:
+        target = generation.get("target") or generation
+        if (
+            target.get("type") == comment.get("type")
+            and target.get("start_line") == comment.get("start_line")
+            and target.get("end_line") == comment.get("end_line")
+        ):
+            return len(generation.get("results") or [])
+    return None
+
+
 def _sidebar_comments(record: dict) -> list[dict]:
-    """The added/modified inline/block comments shown under a file in the sidebar."""
-    return [
-        {field: comment.get(field) for field in SIDEBAR_COMMENT_FIELDS}
-        for comment in (record.get("comments") or [])
-        if comment.get("type") in SIDEBAR_COMMENT_TYPES
-        and comment.get("status") in SIDEBAR_COMMENT_STATUSES
-    ]
+    """The added/modified inline/block comments shown under a file in the
+    sidebar, each annotated with its model-generation count when present."""
+    comments = []
+    for comment in record.get("comments") or []:
+        if comment.get("type") not in SIDEBAR_COMMENT_TYPES:
+            continue
+        if comment.get("status") not in SIDEBAR_COMMENT_STATUSES:
+            continue
+        entry = {field: comment.get(field) for field in SIDEBAR_COMMENT_FIELDS}
+        generation_model_count = _comment_generation_count(record, comment)
+        if generation_model_count is not None:
+            entry["generation_model_count"] = generation_model_count
+        comments.append(entry)
+    return comments
 
 
 def _index_paths(run_dir: Path, dataset: str) -> tuple[Path, Path]:
@@ -96,8 +122,8 @@ def _build_index(source_path: Path) -> tuple[list[dict], dict]:
             entry["comment_count"] = len(record.get("comments") or [])
             entry["sidebar_comments"] = _sidebar_comments(record)
             sidebar_comment_total += len(entry["sidebar_comments"])
-            if "generations" in record:
-                entry["generation_count"] = len(record["generations"] or [])
+            if "comment_generations" in record:
+                entry["generation_count"] = len(record["comment_generations"] or [])
             sidebar.append(entry)
 
             if entry["repo_name"]:
@@ -199,26 +225,36 @@ def _match_generated(sidebar: list[dict], generated_entries: list[dict]) -> int:
         entry = sidebar[sidebar_pos]
         entry["generation_count"] = generated.get("generation_count") or 0
         entry["gen_offset"] = generated["offset"]
+        # The source index is built from repo_files_sample.jsonl, which has no
+        # generations; the generated index carries the same comments annotated
+        # with per-comment generation counts, so adopt those for the sidebar.
+        if generated.get("sidebar_comments"):
+            entry["sidebar_comments"] = generated["sidebar_comments"]
         sidebar_pos += 1
         matched += 1
     return matched
 
 
 def _attach_generation_diffs(record: dict) -> None:
+    """For each model result under each comment generation, attach a unified
+    diff of the human source vs that model's applied code. Since applied_code
+    differs from source_code only at the target comment, this is a single small
+    hunk that the dashboard renders as the model's diff hunk."""
     source_code = record.get("source_code") or ""
     filepath = record.get("new_path") or record.get("filename") or "file.py"
-    for generation in record.get("generations") or []:
-        generated_content = generation.get("generated_content")
-        if not generated_content:
-            generation["diff_vs_source"] = ""
-            continue
-        diff_lines = difflib.unified_diff(
-            source_code.splitlines(keepends=True),
-            generated_content.splitlines(keepends=True),
-            fromfile=f"a/{filepath}",
-            tofile=f"b/{filepath}",
-        )
-        generation["diff_vs_source"] = "".join(diff_lines)
+    for generation in record.get("comment_generations") or []:
+        for result in generation.get("results") or []:
+            applied_code = result.get("applied_code")
+            if not applied_code:
+                result["diff"] = ""
+                continue
+            diff_lines = difflib.unified_diff(
+                source_code.splitlines(keepends=True),
+                applied_code.splitlines(keepends=True),
+                fromfile=f"a/{filepath}",
+                tofile=f"b/{filepath}",
+            )
+            result["diff"] = "".join(diff_lines)
 
 
 def _read_record(source_path: Path, offset: int) -> dict:
