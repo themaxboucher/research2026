@@ -7,7 +7,7 @@ A developer changed the Python code below in a commit. The relevant scope is sho
 </scope>
 
 <change>
-{scope_diff}
+{diff_hunk}
 </change>
 
 # Location

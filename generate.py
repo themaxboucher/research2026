@@ -1,7 +1,7 @@
 import ast
-import difflib
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Callable, NamedTuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,7 +25,6 @@ MODEL_PROFILES = {
         model_names=[
             "meta-llama/llama-3.1-8b-instruct",
             "qwen/qwen-2.5-7b-instruct",
-            "openai/gpt-5-codex",
         ],
         get_completion=openrouter.get_completion,
     ),
@@ -38,10 +37,6 @@ MODEL_PROFILES = {
     ),
 }
 DEFAULT_MODEL_PROFILE = "local"
-
-# Lines of context on each side of a module-level comment with no enclosing
-# function or class.
-MODULE_SCOPE_WINDOW = 15
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "comment_local.md"
 PROMPT_NAME = PROMPT_PATH.name
@@ -86,10 +81,11 @@ def _node_line_span(node: ast.AST) -> tuple[int, int]:
 
 
 def _enclosing_scope_name(source: str, line: int) -> str | None:
-    enclosing_scopes = []
+    enclosing_scopes = []  # List of scopes enclosing the given line, ordered by span length
     for node, qualified_name in _ast_nodes(source):
         start, end = _node_line_span(node)
-        if start <= line <= end:
+        line_is_within_span = start <= line <= end
+        if line_is_within_span:
             span_length = end - start
             enclosing_scopes.append((span_length, qualified_name))
     if not enclosing_scopes:
@@ -98,41 +94,111 @@ def _enclosing_scope_name(source: str, line: int) -> str | None:
     return innermost_name
 
 
-def _scope_code(source_code: str, qualified_name: str) -> str | None:
-    source_lines = source_code.splitlines()
+def _local_scope_bounds(
+    source_lines: list[str], source_code: str, qualified_name: str
+) -> tuple[int, int] | None:
     for node, name in _ast_nodes(source_code):
         if name != qualified_name:
             continue
 
+        # _node_line_span already extends the start up to cover decorators.
         start, end = _node_line_span(node)
 
-        # Include a block comment if one exists for above the scope
+        # Pull in any block comment lines sitting directly above the scope.
         while start > 1 and source_lines[start - 2].strip().startswith("#"):
             start -= 1
 
-        return "\n".join(source_lines[start - 1 : end])
+        return start, end
     return None
 
 
-def _create_diff(old_code: str, new_code: str, filepath: str) -> str:
-    diff_lines = difflib.unified_diff(
-        (old_code or "").splitlines(keepends=True),
-        (new_code or "").splitlines(keepends=True),
-        fromfile=f"a/{filepath}",
-        tofile=f"b/{filepath}",
-    )
-    return "".join(diff_lines)
+def _scope_code(source_code: str, anchor_line_no: int | None) -> str:
+    MAX_LINE_COUNT = 500
+
+    if anchor_line_no is None:
+        return "\n".join(source_code.splitlines()[:MAX_LINE_COUNT])
+
+    source_lines = source_code.splitlines()
+
+    qualified_name = _enclosing_scope_name(source_code, anchor_line_no)
+
+    if qualified_name is None:
+        top = anchor_line_no
+        bottom = anchor_line_no
+
+        while (bottom - top + 1) < min(MAX_LINE_COUNT, len(source_lines)):
+            if top > 1:
+                top -= 1
+            if bottom < len(source_lines):
+                bottom += 1
+
+        return "\n".join(source_lines[top - 1 : bottom])
+
+    scope_bounds = _local_scope_bounds(source_lines, source_code, qualified_name)
+    if scope_bounds is not None:
+        scope_start, scope_end = scope_bounds
+        return "\n".join(source_lines[scope_start - 1 : scope_end])
+
+    return "\n".join(source_code.splitlines()[:MAX_LINE_COUNT])  # Fallback
 
 
-def _anchored_line_no(target: dict, source_lines: list[str]) -> int:
-    if target["type"] == "inline":
-        return target["start_line"]
-    for line_no in range(target["end_line"] + 1, len(source_lines) + 1):
-        stripped = source_lines[line_no - 1].strip()
-        line_is_code = stripped and not stripped.startswith("#")
-        if line_is_code:
-            return line_no
-    return target["end_line"]
+_HUNK_HEADER_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def _relevant_hunk(diff: str, target_line: int) -> str:
+    if not diff:
+        return ""
+
+    hunks: list[tuple[int, int, list[str]]] = []
+    current_lines: list[str] = []
+    current_new_start = 0
+    current_new_count = 0
+
+    for line in diff.splitlines(keepends=True):
+        header_match = _HUNK_HEADER_PATTERN.match(line)
+        if header_match:
+            if current_lines:
+                hunks.append((current_new_start, current_new_count, current_lines))
+            current_new_start = int(header_match.group(1))
+            current_new_count = (
+                int(header_match.group(2)) if header_match.group(2) else 1
+            )
+            current_lines = [line]
+        elif current_lines:
+            current_lines.append(line)
+
+    if current_lines:
+        hunks.append((current_new_start, current_new_count, current_lines))
+
+    for new_start, new_count, hunk_lines in hunks:
+        new_end = new_start + max(new_count - 1, 0)
+        if new_start <= target_line <= new_end:
+            return "".join(hunk_lines)
+
+    return ""
+
+
+def _anchor_line_no(comment_data: dict, source_code: str) -> int | None:
+    if comment_data["type"] == "inline":
+        return comment_data["start_line"]
+
+    anchor = comment_data.get("anchor")
+    if not anchor:
+        return None
+
+    # We can't use the comment data's end_line because it will have moved after
+    # the comment was removed/reverted, so we re-locate the anchor by text. A
+    # block comment always sits above its anchor, so only consider matches at or
+    # below the comment's original start_line and pick the closest one.
+    original_line = comment_data["start_line"]
+    matching_line_nos = [
+        index + 1
+        for index, line in enumerate(source_code.splitlines())
+        if line.strip() == anchor and index + 1 >= original_line
+    ]
+    if not matching_line_nos:
+        return None
+    return min(matching_line_nos)
 
 
 def _reverted_comment_text(target: dict, old_comments: list[dict]) -> str | None:
@@ -153,95 +219,58 @@ def _normalize_block_comment(text: str) -> list[str]:
 
 
 def _normalize_inline_comment(text: str) -> str:
-    first = text.strip().splitlines()[0].strip() if text.strip() else ""
-    if not first.startswith("#"):
-        first = "# " + first.lstrip("#").strip()
-    return first
+    line = text.strip().splitlines()[0].strip() if text.strip() else ""
+    if not line.startswith("#"):
+        line = "# " + line.lstrip("#").strip()
+    return line
 
 
 def code_line_indentation(line: str) -> str:
-    return line[: len(line) - len(line.lstrip())]
+    index_of_first_non_whitespace = len(line) - len(line.lstrip())
+    return line[:index_of_first_non_whitespace]
 
 
-def _replace_inline_comment(line: str, target: dict, comment_text: str) -> str:
-    code_part = target.get("anchor") or line.split("#", 1)[0].rstrip()
-    return code_part + "  " + _normalize_inline_comment(comment_text)
+def _replace_inline_comment(line: str, anchor: str | None, comment_text: str) -> str:
+    naive_anchor_fallback = line.split("#", 1)[0].rstrip()
+    anchor = anchor or naive_anchor_fallback
+    two_spaces = "  "
+    return anchor + two_spaces + _normalize_inline_comment(comment_text)
 
 
-def _apply_comment(source_code: str, target: dict, comment_text: str) -> str:
-    lines = source_code.split("\n")
-    start_index = target["start_line"] - 1
+def _apply_new_comment(
+    source_code: str, human_comment_data: dict, generated_comment_text: str
+) -> str:
+    source_code_lines = source_code.split("\n")
+    start_index = human_comment_data["start_line"] - 1
 
-    if target["type"] == "inline":
-        lines[start_index] = _replace_inline_comment(
-            lines[start_index], target, comment_text
+    is_inline_comment = human_comment_data["type"] == "inline"
+    if is_inline_comment:
+        source_code_lines[start_index] = _replace_inline_comment(
+            source_code_lines[start_index],
+            human_comment_data.get("anchor"),
+            generated_comment_text,
         )
-        return "\n".join(lines)
+        return "\n".join(source_code_lines)
 
-    indentation = code_line_indentation(lines[start_index])
+    indentation = code_line_indentation(source_code_lines[start_index])
     block_lines = [
         indentation + comment_line
-        for comment_line in _normalize_block_comment(comment_text)
+        for comment_line in _normalize_block_comment(generated_comment_text)
     ]
-    lines[start_index : target["end_line"]] = block_lines
-    return "\n".join(lines)
+    source_code_lines[start_index : human_comment_data["end_line"]] = block_lines
+    return "\n".join(source_code_lines)
 
 
-class CommentTask(NamedTuple):
-    filepath: str
-    comment_data: dict
-    scope_code: str
-    scope_diff: str
-    reverted_comment: str | None
-    source_code: str
-    scope_qualified_name: str | None
-
-
-def _build_comment_task(
-    file_data: dict, comment_data: dict, old_comments: list[dict]
-) -> CommentTask:
-    source_code = file_data["source_code"]
-    previous_source_code = file_data["previous_source_code"]
-    filepath = file_data["new_path"]
-
-    anchored_line_no = _anchored_line_no(comment_data, source_code.splitlines())
-    qualified_name = _enclosing_scope_name(source_code, anchored_line_no)
-
-    scope_is_module = qualified_name is None
-
-    if scope_is_module:
-        scope_diff = _create_diff(previous_source_code, source_code, filepath)
-    else:
-        new_scope_code = _scope_code(source_code, qualified_name)
-        old_scope_code = _scope_code(previous_source_code, qualified_name)
-
-        scope_diff = _create_diff(old_scope_code, new_scope_code, filepath)
-
-    reverted_comment = None
-    if comment_data["status"] == "modified":
-        reverted_comment = _reverted_comment_text(comment_data, old_comments)
-
-    return CommentTask(
-        filepath=filepath,
-        comment_data=comment_data,
-        scope_code=new_scope_code,
-        scope_diff=scope_diff,
-        reverted_comment=reverted_comment,
-        source_code=source_code,
-        scope_qualified_name=qualified_name,
-    )
-
-
-def _location_instruction(task: CommentTask) -> str:
-    anchor = task.comment_data.get("anchor") or "(the anchored code)"
-    is_comment_edit = task.comment_data["status"] == "modified"
-    is_inline_comment = task.comment_data["type"] == "inline"
+def _location_instruction(comment_data: dict, unmodified_comment: str | None) -> str:
+    anchor = comment_data.get("anchor") or "(the anchored code)"
+    is_comment_edit = comment_data["status"] == "modified"
+    is_inline_comment = comment_data["type"] == "inline"
 
     if is_inline_comment and is_comment_edit:
         return (
             "Update the inline comment on this line of code:\n"
             f"    {anchor}\n"
-            f"Current (outdated) comment: {task.reverted_comment}"
+            f"Current (outdated) comment: {unmodified_comment}"
         )
 
     if is_inline_comment:
@@ -252,40 +281,80 @@ def _location_instruction(task: CommentTask) -> str:
             "Update the block comment directly above this line of code:\n"
             f"    {anchor}\n"
             "Current (outdated) comment:\n"
-            f"{task.reverted_comment}"
+            f"{unmodified_comment}"
         )
 
     return f"Write a new block comment directly above this line of code:\n    {anchor}"
 
 
-def _build_prompt(task: CommentTask) -> str:
+def _build_prompt(
+    filepath: str,
+    comment_data: dict,
+    scope_code: str,
+    diff_hunk: str,
+    unmodified_comment: str | None,
+) -> str:
     template = PROMPT_PATH.read_text(encoding="utf-8")
     return (
-        template.replace("{file_path}", task.filepath)
-        .replace("{comment_type}", task.comment_data["type"])
-        .replace("{scope_code}", task.scope_code)
-        .replace("{scope_diff}", task.scope_diff)
-        .replace("{location_instruction}", _location_instruction(task))
+        template.replace("{file_path}", filepath)
+        .replace("{comment_type}", comment_data["type"])
+        .replace("{scope_code}", scope_code)
+        .replace("{diff_hunk}", diff_hunk)
+        .replace(
+            "{location_instruction}",
+            _location_instruction(comment_data, unmodified_comment),
+        )
     )
 
 
+def _strip_inline_comment(line: str, anchor: str | None) -> str:
+    if anchor is not None:
+        return anchor
+    naive_anchor_fallback = line.split("#", 1)[0].rstrip()
+    return naive_anchor_fallback
+
+
+def _strip_target_comment(
+    source_code: str, comment_data: dict, unmodified_comment: str | None
+) -> str:
+    is_modified_comment = comment_data["status"] == "modified"
+    if is_modified_comment and unmodified_comment is not None:
+        # Restore the original comment so the model never sees the human's edit.
+        return _apply_new_comment(source_code, comment_data, unmodified_comment)
+
+    source_code_lines = source_code.splitlines()
+    start_index = comment_data["start_line"] - 1
+
+    is_inline_comment = comment_data["type"] == "inline"
+    if is_inline_comment:
+        source_code_lines[start_index] = _strip_inline_comment(
+            source_code_lines[start_index], comment_data.get("anchor")
+        )
+    else:
+        del source_code_lines[start_index : comment_data["end_line"]]
+
+    return "\n".join(source_code_lines)
+
+
 def _generate_comment_with_model(
-    task: CommentTask,
+    prompt: str,
+    filepath: str,
+    source_code: str,
+    comment_data: dict,
     model_name: str,
     get_completion: Callable[[str, str], str],
 ) -> dict:
-    prompt = _build_prompt(task)
     raw_response = get_completion(model_name, prompt)
     try:
         comment_text = raw_response.strip()
         if not comment_text:
             raise ValueError("Model returned an empty comment")
-        applied_code = _apply_comment(task.source_code, task.comment_data, comment_text)
-        ast.parse(applied_code)
+        new_source_code = _apply_new_comment(source_code, comment_data, comment_text)
+        ast.parse(new_source_code)
     except Exception as error:
         logging.warning(
             "Failed to generate comment in %s with model %s: %s",
-            task.filepath,
+            filepath,
             model_name,
             error,
         )
@@ -293,32 +362,90 @@ def _generate_comment_with_model(
             "model": model_name,
             "prompt": prompt,
             "raw_response": raw_response,
-            "comment": None,
-            "applied_code": None,
+            "comment_text": None,
+            "new_source_code": None,
             "error": str(error),
         }
     return {
         "model": model_name,
         "prompt": prompt,
         "raw_response": raw_response,
-        "comment": comment_text,
-        "applied_code": applied_code,
+        "comment_text": comment_text,
+        "new_source_code": new_source_code,
         "error": None,
     }
 
 
-def _run_all_models(task: CommentTask, model_profile: ModelProfile) -> list[dict]:
+def _run_models_concurrently(
+    prompt: str,
+    filepath: str,
+    source_code: str,
+    comment_data: dict,
+    model_profile: ModelProfile,
+) -> list[dict]:
     with ThreadPoolExecutor(max_workers=len(model_profile.model_names)) as executor:
         futures = [
             executor.submit(
                 _generate_comment_with_model,
-                task,
+                prompt,
+                filepath,
+                source_code,
+                comment_data,
                 model_name,
                 model_profile.get_completion,
             )
             for model_name in model_profile.model_names
         ]
         return [future.result() for future in as_completed(futures)]
+
+
+def _comment_generation(
+    file_data: dict,
+    comment_data: dict,
+    model_profile: ModelProfile,
+) -> dict:
+
+    source_code = file_data["source_code"]
+    diff = file_data["diff"]
+    previous_source_code = file_data["previous_source_code"]
+    filepath = file_data["new_path"]
+
+    unmodified_comment = None
+    if comment_data["status"] == "modified":
+        previous_comments = extract_comments(
+            previous_source_code, include_docstrings=False
+        )
+        unmodified_comment = _reverted_comment_text(comment_data, previous_comments)
+
+    source_code_without_target_comment = _strip_target_comment(
+        source_code, comment_data, unmodified_comment
+    )
+
+    anchor_line_no = _anchor_line_no(comment_data, source_code_without_target_comment)
+
+    scope_code = _scope_code(source_code_without_target_comment, anchor_line_no)
+
+    diff_hunk = _relevant_hunk(diff, comment_data["start_line"])
+
+    prompt = _build_prompt(
+        filepath, comment_data, scope_code, diff_hunk, unmodified_comment
+    )
+
+    results = _run_models_concurrently(
+        prompt, filepath, source_code, comment_data, model_profile
+    )
+    return {
+        "type": comment_data["type"],
+        "status": comment_data["status"],
+        "start_line": comment_data["start_line"],
+        "end_line": comment_data["end_line"],
+        "anchor": comment_data.get("anchor"),
+        "comment": comment_data.get("comment"),
+        "unmodified_comment": unmodified_comment,
+        "scope_code": scope_code,
+        "diff_hunk": diff_hunk,
+        "results": results,
+    }
 
 
 def _target_comments(source_file: dict) -> list[dict]:
@@ -332,46 +459,17 @@ def _target_comments(source_file: dict) -> list[dict]:
     ]
 
 
-def _comment_generation(
-    file_data: dict,
-    comment_data: dict,
-    old_comments: list[dict],
-    model_profile: ModelProfile,
-) -> dict:
-    task = _build_comment_task(file_data, comment_data, old_comments)
-    results = _run_all_models(task, model_profile)
-    return {
-        "type": comment_data["type"],
-        "status": comment_data["status"],
-        "start_line": comment_data["start_line"],
-        "end_line": comment_data["end_line"],
-        "anchor": comment_data.get("anchor"),
-        "comment": comment_data.get("comment"),
-        "reverted_comment": task.reverted_comment,
-        "scope_qualified_name": task.scope_qualified_name,
-        "scope_code": task.scope_code,
-        "scope_diff": task.scope_diff,
-        "results": results,
-    }
-
-
 def generate_comments_for_file(file_data: dict, model_profile: ModelProfile) -> None:
     target_comments = _target_comments(file_data)
     if not target_comments:
         file_data["comment_generations"] = []
         return
 
-    previous_comments = extract_comments(
-        file_data.get("previous_source_code"), include_docstrings=False
-    )
-
     comment_generations = []
     for comment_data in target_comments:
         try:
             comment_generations.append(
-                _comment_generation(
-                    file_data, comment_data, previous_comments, model_profile
-                )
+                _comment_generation(file_data, comment_data, model_profile)
             )
         except Exception as error:
             logging.warning(
