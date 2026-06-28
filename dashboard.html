@@ -1410,7 +1410,7 @@
         for (const result of sorted) {
           const modelName =
             (result.model || "").split("/").pop() || "(unknown model)";
-          if (result.error || !result.comment) {
+          if (result.error || !result.comment_text) {
             const block = document.createElement("div");
             block.className = "comment-detail";
             block.innerHTML = `<div class="cd-sub">${escapeHTML(modelName)}</div>`;
@@ -1425,7 +1425,7 @@
             path,
             comment,
             model: modelName,
-            commentText: result.comment,
+            commentText: result.comment_text,
             diffText: result.diff || "",
             hunkTitle: "Model diff hunk",
             hunkMode: "model",

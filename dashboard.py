@@ -237,20 +237,20 @@ def _match_generated(sidebar: list[dict], generated_entries: list[dict]) -> int:
 
 def _attach_generation_diffs(record: dict) -> None:
     """For each model result under each comment generation, attach a unified
-    diff of the human source vs that model's applied code. Since applied_code
+    diff of the human source vs the model's new source. Since new_source_code
     differs from source_code only at the target comment, this is a single small
     hunk that the dashboard renders as the model's diff hunk."""
     source_code = record.get("source_code") or ""
     filepath = record.get("new_path") or record.get("filename") or "file.py"
     for generation in record.get("comment_generations") or []:
         for result in generation.get("results") or []:
-            applied_code = result.get("applied_code")
-            if not applied_code:
+            new_source_code = result.get("new_source_code")
+            if not new_source_code:
                 result["diff"] = ""
                 continue
             diff_lines = difflib.unified_diff(
                 source_code.splitlines(keepends=True),
-                applied_code.splitlines(keepends=True),
+                new_source_code.splitlines(keepends=True),
                 fromfile=f"a/{filepath}",
                 tofile=f"b/{filepath}",
             )
