@@ -142,39 +142,95 @@ def _scope_code(source_code: str, anchor_line_no: int | None) -> str:
     return "\n".join(source_code.splitlines()[:MAX_LINE_COUNT])  # Fallback
 
 
-_HUNK_HEADER_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+_HUNK_HEADER_PATTERN = re.compile(
+    r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@"
+)
 
 
-def _relevant_hunk(diff: str, target_line: int) -> str:
+def _iter_hunks(diff: str):
+    current: dict | None = None
+    for line in diff.splitlines(keepends=True):
+        match = _HUNK_HEADER_PATTERN.match(line)
+        if match:
+            if current is not None:
+                yield current
+            current = {
+                "old_start": int(match.group(1)),
+                "old_count": int(match.group(2)) if match.group(2) else 1,
+                "new_start": int(match.group(3)),
+                "new_count": int(match.group(4)) if match.group(4) else 1,
+                "body": [],
+            }
+        elif current is not None:
+            current["body"].append(line)
+    if current is not None:
+        yield current
+
+
+def _strip_target_from_hunk(
+    hunk: dict, target_start_line: int, target_end_line: int
+) -> str:
+    """Drop `+` lines whose new-side line falls in the target range, and
+    convert the `-` lines they pair with into context lines. Surrounding
+    changes in the hunk are preserved verbatim. The header counts are
+    recomputed since the body changes."""
+    output_body: list[str] = []
+    pending_dashes: list[str] = []  # `-` lines awaiting pairing with `+` lines
+    new_line = hunk["new_start"]
+
+    for body_line in hunk["body"]:
+        if not body_line or body_line[0] == "\\":
+            # Markers like "\ No newline at end of file" stay as-is.
+            output_body.append(body_line)
+            continue
+
+        prefix = body_line[0]
+        if prefix == " ":
+            output_body.extend(pending_dashes)
+            pending_dashes = []
+            output_body.append(body_line)
+            new_line += 1
+        elif prefix == "-":
+            pending_dashes.append(body_line)
+        elif prefix == "+":
+            if target_start_line <= new_line <= target_end_line:
+                if pending_dashes:
+                    dash = pending_dashes.pop(0)
+                    output_body.append(" " + dash[1:])
+            else:
+                output_body.extend(pending_dashes)
+                pending_dashes = []
+                output_body.append(body_line)
+            new_line += 1
+        else:
+            output_body.append(body_line)
+
+    output_body.extend(pending_dashes)
+
+    new_old_count = sum(1 for line in output_body if line and line[0] in " -")
+    new_new_count = sum(1 for line in output_body if line and line[0] in " +")
+    new_header = (
+        f"@@ -{hunk['old_start']},{new_old_count} "
+        f"+{hunk['new_start']},{new_new_count} @@\n"
+    )
+    return new_header + "".join(output_body)
+
+
+def _stripped_relevant_hunk(
+    diff: str, target_start_line: int, target_end_line: int
+) -> str:
+    """Find the hunk whose new-side range overlaps the target comment, then
+    strip the target comment's own change from it so the model never sees the
+    human's edit. Other changes in the same hunk are preserved."""
     if not diff:
         return ""
 
-    hunks: list[tuple[int, int, list[str]]] = []
-    current_lines: list[str] = []
-    current_new_start = 0
-    current_new_count = 0
-
-    for line in diff.splitlines(keepends=True):
-        header_match = _HUNK_HEADER_PATTERN.match(line)
-        if header_match:
-            if current_lines:
-                hunks.append((current_new_start, current_new_count, current_lines))
-            current_new_start = int(header_match.group(1))
-            current_new_count = (
-                int(header_match.group(2)) if header_match.group(2) else 1
-            )
-            current_lines = [line]
-        elif current_lines:
-            current_lines.append(line)
-
-    if current_lines:
-        hunks.append((current_new_start, current_new_count, current_lines))
-
-    for new_start, new_count, hunk_lines in hunks:
-        new_end = new_start + max(new_count - 1, 0)
-        if new_start <= target_line <= new_end:
-            return "".join(hunk_lines)
-
+    # A modified block comment can span lines outside the hunk (only the
+    # changed lines are inside it), so match by interval overlap.
+    for hunk in _iter_hunks(diff):
+        new_end = hunk["new_start"] + max(hunk["new_count"] - 1, 0)
+        if hunk["new_start"] <= target_end_line and target_start_line <= new_end:
+            return _strip_target_from_hunk(hunk, target_start_line, target_end_line)
     return ""
 
 
@@ -425,7 +481,9 @@ def _comment_generation(
 
     scope_code = _scope_code(source_code_without_target_comment, anchor_line_no)
 
-    diff_hunk = _relevant_hunk(diff, comment_data["start_line"])
+    diff_hunk = _stripped_relevant_hunk(
+        diff, comment_data["start_line"], comment_data["end_line"]
+    )
 
     prompt = _build_prompt(
         filepath, comment_data, scope_code, diff_hunk, unmodified_comment
