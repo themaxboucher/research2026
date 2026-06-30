@@ -9,3 +9,5 @@ data/
 reports/
 runs/
 logs/
+dist/
+.vercel/

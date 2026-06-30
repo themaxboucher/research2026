@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LLM Comment Generations</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --bg-subtle: #161b22;
+        --bg-sunken: #010409;
+        --border: #30363d;
+        --border-muted: #21262d;
+        --text: #e6edf3;
+        --text-muted: #8b949e;
+        --accent: #2f81f7;
+        --human: #3fb950;
+        --model: #bc8cff;
+        --chip-add: rgba(46, 160, 67, 0.15);
+        --chip-add-fg: #3fb950;
+        --chip-modify: rgba(187, 128, 9, 0.15);
+        --chip-modify-fg: #d29922;
+        --chip-error: rgba(248, 81, 73, 0.15);
+        --chip-error-fg: #f85149;
+      }
+      ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #484f58;
+        border: 3px solid var(--bg);
+        border-radius: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+      }
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+          sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      header.topbar {
+        padding: 18px 32px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-subtle);
+        display: flex;
+        align-items: baseline;
+        gap: 18px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      header.topbar h1 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 600;
+      }
+      header.topbar .meta {
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+      header.topbar .search {
+        margin-left: auto;
+      }
+      header.topbar input[type="text"] {
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 12px;
+        font-size: 13px;
+        width: 260px;
+      }
+      header.topbar input[type="text"]::placeholder {
+        color: var(--text-muted);
+      }
+      main {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 28px 24px 80px;
+      }
+      .target-card {
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-bottom: 28px;
+        overflow: hidden;
+      }
+      .card-header {
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+      .card-header .repo {
+        font-weight: 600;
+        color: var(--text);
+      }
+      .card-header .commit {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .card-header .path {
+        color: var(--text-muted);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        word-break: break-all;
+        flex: 1;
+        min-width: 0;
+      }
+      .card-header .lines {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .chip {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .chip.inline,
+      .chip.block,
+      .chip.docstring {
+        background: rgba(56, 139, 253, 0.15);
+        color: #58a6ff;
+      }
+      .chip.added {
+        background: var(--chip-add);
+        color: var(--chip-add-fg);
+      }
+      .chip.modified {
+        background: var(--chip-modify);
+        color: var(--chip-modify-fg);
+      }
+      .section-label {
+        padding: 12px 20px 8px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .section-label .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      .section-label .dot.human {
+        background: var(--human);
+      }
+      .section-label .dot.model {
+        background: var(--model);
+      }
+      .prompt-wrap {
+        padding: 0 20px 14px;
+      }
+      .prompt-body {
+        background: var(--bg-sunken);
+        border: 1px solid var(--border-muted);
+        border-radius: 8px;
+        padding: 16px 20px;
+        font-size: 13.5px;
+        line-height: 1.65;
+        color: var(--text);
+        overflow-x: auto;
+      }
+      .prompt-body p {
+        margin: 0 0 12px;
+      }
+      .prompt-body p:last-child {
+        margin-bottom: 0;
+      }
+      .prompt-body h1,
+      .prompt-body h2,
+      .prompt-body h3 {
+        margin: 18px 0 10px;
+        font-weight: 600;
+        color: var(--text);
+        border-bottom: 1px solid var(--border-muted);
+        padding-bottom: 4px;
+      }
+      .prompt-body h1 {
+        font-size: 15px;
+      }
+      .prompt-body h2 {
+        font-size: 14px;
+      }
+      .prompt-body h3 {
+        font-size: 13px;
+      }
+      .prompt-body h1:first-child,
+      .prompt-body h2:first-child,
+      .prompt-body h3:first-child {
+        margin-top: 0;
+      }
+      .prompt-body ol,
+      .prompt-body ul {
+        margin: 0 0 12px;
+        padding-left: 22px;
+      }
+      .prompt-body li {
+        margin: 3px 0;
+      }
+      .prompt-body :not(pre) > code {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        background: rgba(110, 118, 129, 0.2);
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 0.92em;
+        color: #f0883e;
+      }
+      .prompt-body pre {
+        margin: 12px 0;
+        padding: 0;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .prompt-body pre > code.hljs {
+        display: block;
+        padding: 12px 14px;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+        background: var(--bg);
+        white-space: pre;
+        overflow-x: auto;
+      }
+      /* highlight.js's `diff` language paints +/- lines, but tints the whole
+         line subtly to make additions/deletions pop the way diff2html did. */
+      .prompt-body pre > code.language-diff .hljs-addition {
+        background: rgba(46, 160, 67, 0.15);
+        display: block;
+      }
+      .prompt-body pre > code.language-diff .hljs-deletion {
+        background: rgba(248, 81, 73, 0.15);
+        display: block;
+      }
+      .prompt-body pre > code.language-diff .hljs-meta {
+        color: var(--text-muted);
+      }
+      .comments-grid {
+        padding: 4px 20px 20px;
+        display: grid;
+        gap: 14px;
+      }
+      .comment-block {
+        background: var(--bg-sunken);
+        border: 1px solid var(--border-muted);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .comment-block.human {
+        border-color: rgba(63, 185, 80, 0.35);
+      }
+      .comment-block.model {
+        border-color: rgba(188, 140, 255, 0.3);
+      }
+      .comment-block .cb-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .comment-block.human .cb-head {
+        background: rgba(63, 185, 80, 0.08);
+        color: var(--human);
+      }
+      .comment-block.model .cb-head {
+        background: rgba(188, 140, 255, 0.08);
+        color: var(--model);
+      }
+      .comment-block pre {
+        margin: 0;
+        padding: 12px 14px;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--text);
+        background: var(--bg-sunken);
+      }
+      .comment-block.error pre {
+        color: var(--chip-error-fg);
+      }
+      .comment-block.error .cb-head {
+        background: var(--chip-error);
+        color: var(--chip-error-fg);
+      }
+      .empty-state {
+        padding: 80px 20px;
+        text-align: center;
+        color: var(--text-muted);
+      }
+      .empty-state h2 {
+        margin: 0 0 8px;
+        color: var(--text);
+        font-size: 16px;
+      }
+      .anchor-pill {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px 7px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 220px;
+        display: inline-block;
+        vertical-align: middle;
+      }
+      footer.footnote {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        padding: 20px;
+        border-top: 1px solid var(--border-muted);
+      }
+      footer.footnote a {
+        color: var(--text-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>LLM Comment Generations</h1>
+      <span class="meta" id="meta"></span>
+      <div class="search">
+        <input
+          type="text"
+          id="search"
+          placeholder="Filter by repo, path, or comment text"
+        />
+      </div>
+    </header>
+
+    <main id="root"></main>
+
+    <footer class="footnote">
+      Static comparison view · built from
+      <span id="source-name"></span>
+    </footer>
+
+    <script id="payload-data" type="application/json">__DATA_JSON__</script>
+
+    <script>
+      const DATA = JSON.parse(document.getElementById("payload-data").textContent);
+      const state = { query: "" };
+
+      function escapeHTML(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function lineLabel(target) {
+        if (target.start_line == null) return "";
+        if (target.start_line === target.end_line) return `L${target.start_line}`;
+        return `L${target.start_line}-${target.end_line}`;
+      }
+
+      // Configure marked once; ask highlight.js to colorize each fenced code
+      // block using its declared language (we emit ```python and ```diff at
+      // build time).
+      marked.setOptions({
+        gfm: true,
+        breaks: false,
+        highlight: (code, lang) => {
+          if (!lang) return escapeHTML(code);
+          try {
+            return hljs.highlight(code, { language: lang, ignoreIllegals: true })
+              .value;
+          } catch {
+            return escapeHTML(code);
+          }
+        },
+      });
+
+      function renderPrompt(container, target) {
+        if (!target.prompt) {
+          container.innerHTML = `<div class="empty-state" style="padding:24px;">No prompt available.</div>`;
+          return;
+        }
+        const body = document.createElement("div");
+        body.className = "prompt-body";
+        body.innerHTML = marked.parse(target.prompt);
+        // marked's highlight option fills in the inner HTML but doesn't set
+        // the language class hljs needs for its themed selectors; add it.
+        for (const codeEl of body.querySelectorAll("pre > code")) {
+          if (!codeEl.classList.contains("hljs")) codeEl.classList.add("hljs");
+        }
+        container.appendChild(body);
+      }
+
+      function commentBlock(kind, label, text, error) {
+        const block = document.createElement("div");
+        block.className =
+          "comment-block " + kind + (error ? " error" : "");
+        const head = document.createElement("div");
+        head.className = "cb-head";
+        head.textContent = label;
+        const pre = document.createElement("pre");
+        pre.textContent = error ? `⚠ ${error}` : text || "(empty)";
+        block.append(head, pre);
+        return block;
+      }
+
+      function buildCard(target, index) {
+        const card = document.createElement("section");
+        card.className = "target-card";
+        card.dataset.index = String(index);
+
+        const header = document.createElement("div");
+        header.className = "card-header";
+        const repo = escapeHTML(target.repo || "(no repo)");
+        const commit = target.commit ? escapeHTML(target.commit) : "";
+        const path = escapeHTML(target.path || "");
+        const lines = escapeHTML(lineLabel(target));
+        const typeChip = target.type
+          ? `<span class="chip ${escapeHTML(target.type)}">${escapeHTML(target.type)}</span>`
+          : "";
+        const statusChip = target.status
+          ? `<span class="chip ${escapeHTML(target.status)}">${escapeHTML(target.status)}</span>`
+          : "";
+        const anchor = target.anchor
+          ? `<span class="anchor-pill" title="${escapeHTML(target.anchor)}">${escapeHTML(target.anchor)}</span>`
+          : "";
+        header.innerHTML = `
+          <span class="repo">${repo}</span>
+          ${commit ? `<span class="commit">@ ${commit}</span>` : ""}
+          <span class="path" title="${path}">${path}</span>
+          ${typeChip}
+          ${statusChip}
+          ${anchor}
+          ${lines ? `<span class="lines">${lines}</span>` : ""}
+        `;
+        card.appendChild(header);
+
+        const promptLabel = document.createElement("div");
+        promptLabel.className = "section-label";
+        promptLabel.textContent = "Prompt sent to models";
+        card.appendChild(promptLabel);
+
+        const promptWrap = document.createElement("div");
+        promptWrap.className = "prompt-wrap";
+        card.appendChild(promptWrap);
+        renderPrompt(promptWrap, target);
+
+        const compareLabel = document.createElement("div");
+        compareLabel.className = "section-label";
+        compareLabel.innerHTML = `
+          <span class="dot human"></span> Human
+          <span style="opacity:0.4; padding:0 6px;">vs</span>
+          <span class="dot model"></span> Models
+        `;
+        card.appendChild(compareLabel);
+
+        const grid = document.createElement("div");
+        grid.className = "comments-grid";
+        grid.appendChild(commentBlock("human", "Human", target.human, null));
+        for (const result of target.results || []) {
+          grid.appendChild(
+            commentBlock("model", result.model || "(model)", result.comment, result.error),
+          );
+        }
+        card.appendChild(grid);
+        return card;
+      }
+
+      function targetHaystack(target) {
+        const parts = [
+          target.repo,
+          target.path,
+          target.human,
+          target.anchor,
+          target.prompt,
+        ];
+        for (const r of target.results || []) {
+          parts.push(r.comment, r.model);
+        }
+        return parts.filter(Boolean).join(" ").toLowerCase();
+      }
+
+      function render() {
+        const root = document.getElementById("root");
+        root.innerHTML = "";
+        const query = state.query.trim().toLowerCase();
+        const filtered = query
+          ? DATA.targets.filter((t) => targetHaystack(t).includes(query))
+          : DATA.targets;
+
+        if (!filtered.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty-state";
+          empty.innerHTML = `<h2>No matches</h2><p>Try a different search term.</p>`;
+          root.appendChild(empty);
+        } else {
+          filtered.forEach((target, index) => {
+            root.appendChild(buildCard(target, index));
+          });
+        }
+
+        const repoCount = new Set(DATA.targets.map((t) => t.repo)).size;
+        const modelLabel =
+          DATA.models.length === 1
+            ? DATA.models[0]
+            : `${DATA.models.length} models`;
+        document.getElementById("meta").textContent =
+          `${filtered.length}${query ? ` of ${DATA.targets.length}` : ""} ` +
+          `target${filtered.length === 1 ? "" : "s"} · ` +
+          `${repoCount} repo${repoCount === 1 ? "" : "s"} · ${modelLabel}`;
+        document.getElementById("source-name").textContent =
+          DATA.source + " · generated " + DATA.generated_at;
+      }
+
+      let searchTimer = null;
+      document.getElementById("search").addEventListener("input", (event) => {
+        state.query = event.target.value;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(render, 150);
+      });
+
+      render();
+    </script>
+  </body>
+</html>
