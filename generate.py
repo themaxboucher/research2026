@@ -154,11 +154,16 @@ def _iter_hunks(diff: str):
         if match:
             if current is not None:
                 yield current
+            # Anything after the closing `@@` is the function-context hint
+            # git adds (e.g. " def foo():"). Keep it so the LLM gets the same
+            # signal git would have shown.
+            header_suffix = line[match.end():].rstrip("\n")
             current = {
                 "old_start": int(match.group(1)),
                 "old_count": int(match.group(2)) if match.group(2) else 1,
                 "new_start": int(match.group(3)),
                 "new_count": int(match.group(4)) if match.group(4) else 1,
+                "header_suffix": header_suffix,
                 "body": [],
             }
         elif current is not None:
@@ -172,7 +177,9 @@ def _strip_target_from_hunk(
 ) -> str:
     """Drop `+` lines whose new-side line falls in the target range, and
     convert the `-` lines they pair with into context lines. Surrounding
-    changes in the hunk are preserved verbatim. The header counts are
+    changes in the hunk keep their semantics — each `+` consumes its
+    positionally paired `-` (FIFO), so a non-target `+` can't steal a
+    dash that belongs to a later target `+`. The header counts are
     recomputed since the body changes."""
     output_body: list[str] = []
     pending_dashes: list[str] = []  # `-` lines awaiting pairing with `+` lines
@@ -193,13 +200,14 @@ def _strip_target_from_hunk(
         elif prefix == "-":
             pending_dashes.append(body_line)
         elif prefix == "+":
-            if target_start_line <= new_line <= target_end_line:
-                if pending_dashes:
-                    dash = pending_dashes.pop(0)
-                    output_body.append(" " + dash[1:])
+            line_is_target = target_start_line <= new_line <= target_end_line
+            paired_dash = pending_dashes.pop(0) if pending_dashes else None
+            if line_is_target:
+                if paired_dash is not None:
+                    output_body.append(" " + paired_dash[1:])
             else:
-                output_body.extend(pending_dashes)
-                pending_dashes = []
+                if paired_dash is not None:
+                    output_body.append(paired_dash)
                 output_body.append(body_line)
             new_line += 1
         else:
@@ -211,27 +219,23 @@ def _strip_target_from_hunk(
     new_new_count = sum(1 for line in output_body if line and line[0] in " +")
     new_header = (
         f"@@ -{hunk['old_start']},{new_old_count} "
-        f"+{hunk['new_start']},{new_new_count} @@\n"
+        f"+{hunk['new_start']},{new_new_count} @@"
+        f"{hunk.get('header_suffix', '')}\n"
     )
     return new_header + "".join(output_body)
 
 
 def _stripped_relevant_hunk(
     diff: str, target_start_line: int, target_end_line: int
-) -> str:
-    """Find the hunk whose new-side range overlaps the target comment, then
-    strip the target comment's own change from it so the model never sees the
-    human's edit. Other changes in the same hunk are preserved."""
-    if not diff:
-        return ""
-
+) -> str | None:
     # A modified block comment can span lines outside the hunk (only the
     # changed lines are inside it), so match by interval overlap.
     for hunk in _iter_hunks(diff):
         new_end = hunk["new_start"] + max(hunk["new_count"] - 1, 0)
-        if hunk["new_start"] <= target_end_line and target_start_line <= new_end:
+        target_overlaps_hunk = hunk["new_start"] <= target_end_line and target_start_line <= new_end
+        if target_overlaps_hunk:
             return _strip_target_from_hunk(hunk, target_start_line, target_end_line)
-    return ""
+    return None
 
 
 def _anchor_line_no(comment_data: dict, source_code: str) -> int | None:
