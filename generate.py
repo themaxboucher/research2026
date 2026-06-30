@@ -329,22 +329,22 @@ def _location_instruction(comment_data: dict, unmodified_comment: str | None) ->
     if is_inline_comment and is_comment_edit:
         return (
             "Update the inline comment on this line of code:\n"
-            f"    {anchor}\n"
-            f"Current (outdated) comment: {unmodified_comment}"
+            f"```python\n{anchor}\n```\n"
+            f"Current (outdated) comment:\n```python\n{unmodified_comment}\n```"
         )
 
     if is_inline_comment:
-        return f"Write a new inline comment for this line of code:\n    {anchor}"
+        return f"Write a new inline comment for this line of code:\n```python\n{anchor}\n```"
 
     if is_comment_edit:
         return (
             "Update the block comment directly above this line of code:\n"
-            f"    {anchor}\n"
+            f"```python\n{anchor}\n```\n"
             "Current (outdated) comment:\n"
-            f"{unmodified_comment}"
+            f"```python\n{unmodified_comment}\n```"
         )
 
-    return f"Write a new block comment directly above this line of code:\n    {anchor}"
+    return f"Write a new block comment directly above this line of code:\n```python\n{anchor}\n```"
 
 
 def _build_prompt(
