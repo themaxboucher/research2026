@@ -25,6 +25,8 @@ MODEL_PROFILES = {
         model_names=[
             "meta-llama/llama-3.1-8b-instruct",
             "qwen/qwen-2.5-7b-instruct",
+            "deepseek/deepseek-v4-pro",
+            "z-ai/glm-5.2"
         ],
         get_completion=openrouter.get_completion,
     ),
@@ -112,34 +114,27 @@ def _local_scope_bounds(
     return None
 
 
-def _scope_code(source_code: str, anchor_line_no: int | None) -> str:
+def _diff_region_bounds(
+    source_code: str, source_lines: list[str], anchor_line: int
+) -> tuple[int, int]:
+    """Line bounds (1-indexed, inclusive) of the local scope enclosing
+    `anchor_line`. When the change isn't inside a function or class, fall back
+    to a window of up to MAX_LINE_COUNT lines centered on the anchor."""
     MAX_LINE_COUNT = 500
 
-    if anchor_line_no is None:
-        return "\n".join(source_code.splitlines()[:MAX_LINE_COUNT])
+    qualified_name = _enclosing_scope_name(source_code, anchor_line)
+    if qualified_name is not None:
+        scope_bounds = _local_scope_bounds(source_lines, source_code, qualified_name)
+        if scope_bounds is not None:
+            return scope_bounds
 
-    source_lines = source_code.splitlines()
-
-    qualified_name = _enclosing_scope_name(source_code, anchor_line_no)
-
-    if qualified_name is None:
-        top = anchor_line_no
-        bottom = anchor_line_no
-
-        while (bottom - top + 1) < min(MAX_LINE_COUNT, len(source_lines)):
-            if top > 1:
-                top -= 1
-            if bottom < len(source_lines):
-                bottom += 1
-
-        return "\n".join(source_lines[top - 1 : bottom])
-
-    scope_bounds = _local_scope_bounds(source_lines, source_code, qualified_name)
-    if scope_bounds is not None:
-        scope_start, scope_end = scope_bounds
-        return "\n".join(source_lines[scope_start - 1 : scope_end])
-
-    return "\n".join(source_code.splitlines()[:MAX_LINE_COUNT])  # Fallback
+    top = bottom = anchor_line
+    while (bottom - top + 1) < min(MAX_LINE_COUNT, len(source_lines)):
+        if top > 1:
+            top -= 1
+        if bottom < len(source_lines):
+            bottom += 1
+    return top, bottom
 
 
 _HUNK_HEADER_PATTERN = re.compile(
@@ -172,15 +167,27 @@ def _iter_hunks(diff: str):
         yield current
 
 
-def _strip_target_from_hunk(
-    hunk: dict, target_start_line: int, target_end_line: int
-) -> str:
-    """Drop `+` lines whose new-side line falls in the target range, and
-    convert the `-` lines they pair with into context lines. Surrounding
-    changes in the hunk keep their semantics — each `+` consumes its
-    positionally paired `-` (FIFO), so a non-target `+` can't steal a
-    dash that belongs to a later target `+`. The header counts are
-    recomputed since the body changes."""
+def _target_line_code(body_line: str, comment_data: dict) -> str | None:
+    """The comment-free code that should remain on a target `+` line. A block
+    comment line is wholly comment, so nothing remains (None). An inline comment
+    sits on a code line that may itself have changed, so keep the code."""
+    if comment_data["type"] != "inline":
+        return None
+    anchor = comment_data.get("anchor")
+    if anchor is not None:
+        return anchor
+    return body_line[1:].split("#", 1)[0].rstrip()
+
+
+def _stripped_hunk_body(hunk: dict, comment_data: dict) -> list[str]:
+    """Return the hunk body with the human's target comment removed. A block
+    target `+` line is dropped and its paired `-` reverts to context. An inline
+    target keeps its code change (comment stripped), collapsing to context only
+    when the code itself is unchanged. Surrounding changes keep their semantics —
+    each `+` consumes its positionally paired `-` (FIFO), so a non-target `+`
+    can't steal a dash that belongs to a later target `+`."""
+    target_start_line = comment_data["start_line"]
+    target_end_line = comment_data["end_line"]
     output_body: list[str] = []
     pending_dashes: list[str] = []  # `-` lines awaiting pairing with `+` lines
     new_line = hunk["new_start"]
@@ -203,8 +210,24 @@ def _strip_target_from_hunk(
             line_is_target = target_start_line <= new_line <= target_end_line
             paired_dash = pending_dashes.pop(0) if pending_dashes else None
             if line_is_target:
-                if paired_dash is not None:
-                    output_body.append(" " + paired_dash[1:])
+                code = _target_line_code(body_line, comment_data)
+                # Compare the code either side of the change, ignoring comments.
+                # A naive split can only over-report a change (a `#` in a string),
+                # which is safe: it shows a `-`/`+` pair rather than hiding a change.
+                old_code = (
+                    None if paired_dash is None
+                    else paired_dash[1:].split("#", 1)[0].rstrip()
+                )
+                code_is_unchanged = old_code is not None and old_code == (code or "").rstrip()
+                if code is None or code_is_unchanged:
+                    # Nothing left to show, or the comment was the only change:
+                    # fold back to a single context line where one existed.
+                    if paired_dash is not None:
+                        output_body.append(" " + paired_dash[1:])
+                else:
+                    if paired_dash is not None:
+                        output_body.append(paired_dash)
+                    output_body.append("+" + code + "\n")
             else:
                 if paired_dash is not None:
                     output_body.append(paired_dash)
@@ -214,51 +237,59 @@ def _strip_target_from_hunk(
             output_body.append(body_line)
 
     output_body.extend(pending_dashes)
+    return output_body
 
-    new_old_count = sum(1 for line in output_body if line and line[0] in " -")
-    new_new_count = sum(1 for line in output_body if line and line[0] in " +")
-    new_header = (
-        f"@@ -{hunk['old_start']},{new_old_count} "
-        f"+{hunk['new_start']},{new_new_count} @@"
-        f"{hunk.get('header_suffix', '')}\n"
+
+def _scope_diff(diff: str, source_code: str, comment_data: dict) -> str | None:
+    """Build one unified-diff hunk whose context spans the entire local scope
+    enclosing the changed comment. Every change hunk within that scope is merged
+    in, the gaps between them padded with the scope's unchanged lines, and the
+    human's target comment stripped out. Returns None when no hunk overlaps the
+    scope (the target comment can't be located in the change)."""
+    source_lines = source_code.splitlines()
+
+    region_start, region_end = _diff_region_bounds(
+        source_code, source_lines, comment_data["start_line"]
     )
-    return new_header + "".join(output_body)
 
-
-def _stripped_relevant_hunk(
-    diff: str, target_start_line: int, target_end_line: int
-) -> str | None:
-    # A modified block comment can span lines outside the hunk (only the
-    # changed lines are inside it), so match by interval overlap.
+    overlapping = []
     for hunk in _iter_hunks(diff):
         new_end = hunk["new_start"] + max(hunk["new_count"] - 1, 0)
-        target_overlaps_hunk = hunk["new_start"] <= target_end_line and target_start_line <= new_end
-        if target_overlaps_hunk:
-            return _strip_target_from_hunk(hunk, target_start_line, target_end_line)
-    return None
-
-
-def _anchor_line_no(comment_data: dict, source_code: str) -> int | None:
-    if comment_data["type"] == "inline":
-        return comment_data["start_line"]
-
-    anchor = comment_data.get("anchor")
-    if not anchor:
+        overlaps_region = hunk["new_start"] <= region_end and region_start <= new_end
+        if overlaps_region:
+            overlapping.append(hunk)
+    if not overlapping:
         return None
+    overlapping.sort(key=lambda hunk: hunk["new_start"])
 
-    # We can't use the comment data's end_line because it will have moved after
-    # the comment was removed/reverted, so we re-locate the anchor by text. A
-    # block comment always sits above its anchor, so only consider matches at or
-    # below the comment's original start_line and pick the closest one.
-    original_line = comment_data["start_line"]
-    matching_line_nos = [
-        index + 1
-        for index, line in enumerate(source_code.splitlines())
-        if line.strip() == anchor and index + 1 >= original_line
-    ]
-    if not matching_line_nos:
-        return None
-    return min(matching_line_nos)
+    # Widen the region so it fully contains every hunk we merge in — a hunk's
+    # few lines of git context may spill just past the scope boundary.
+    region_start = min(region_start, overlapping[0]["new_start"])
+    last_hunk = overlapping[-1]
+    last_hunk_end = last_hunk["new_start"] + max(last_hunk["new_count"] - 1, 0)
+    region_end = min(max(region_end, last_hunk_end), len(source_lines))
+
+    body: list[str] = []
+    new_cursor = region_start  # Next new-side line not yet emitted.
+    for hunk in overlapping:
+        for line_no in range(new_cursor, hunk["new_start"]):
+            body.append(" " + source_lines[line_no - 1] + "\n")
+        body.extend(_stripped_hunk_body(hunk, comment_data))
+        # The hunk occupies its full committed new-side span even where the
+        # target comment was dropped, so advance by the original count to keep
+        # the padding from re-emitting those lines.
+        new_cursor = hunk["new_start"] + hunk["new_count"]
+    for line_no in range(new_cursor, region_end + 1):
+        body.append(" " + source_lines[line_no - 1] + "\n")
+
+    old_start = overlapping[0]["old_start"] - (overlapping[0]["new_start"] - region_start)
+    old_count = sum(1 for line in body if line and line[0] in " -")
+    new_count = sum(1 for line in body if line and line[0] in " +")
+    header = (
+        f"@@ -{old_start},{old_count} +{region_start},{new_count} @@"
+        f"{overlapping[0].get('header_suffix', '')}\n"
+    )
+    return header + "".join(body)
 
 
 def _reverted_comment_text(target: dict, old_comments: list[dict]) -> str | None:
@@ -350,7 +381,6 @@ def _location_instruction(comment_data: dict, unmodified_comment: str | None) ->
 def _build_prompt(
     filepath: str,
     comment_data: dict,
-    scope_code: str,
     diff_hunk: str,
     unmodified_comment: str | None,
 ) -> str:
@@ -358,42 +388,12 @@ def _build_prompt(
     return (
         template.replace("{file_path}", filepath)
         .replace("{comment_type}", comment_data["type"])
-        .replace("{scope_code}", scope_code)
         .replace("{diff_hunk}", diff_hunk)
         .replace(
             "{location_instruction}",
             _location_instruction(comment_data, unmodified_comment),
         )
     )
-
-
-def _strip_inline_comment(line: str, anchor: str | None) -> str:
-    if anchor is not None:
-        return anchor
-    naive_anchor_fallback = line.split("#", 1)[0].rstrip()
-    return naive_anchor_fallback
-
-
-def _strip_target_comment(
-    source_code: str, comment_data: dict, unmodified_comment: str | None
-) -> str:
-    is_modified_comment = comment_data["status"] == "modified"
-    if is_modified_comment and unmodified_comment is not None:
-        # Restore the original comment so the model never sees the human's edit.
-        return _apply_new_comment(source_code, comment_data, unmodified_comment)
-
-    source_code_lines = source_code.splitlines()
-    start_index = comment_data["start_line"] - 1
-
-    is_inline_comment = comment_data["type"] == "inline"
-    if is_inline_comment:
-        source_code_lines[start_index] = _strip_inline_comment(
-            source_code_lines[start_index], comment_data.get("anchor")
-        )
-    else:
-        del source_code_lines[start_index : comment_data["end_line"]]
-
-    return "\n".join(source_code_lines)
 
 
 def _generate_comment_with_model(
@@ -477,21 +477,9 @@ def _comment_generation(
         )
         unmodified_comment = _reverted_comment_text(comment_data, previous_comments)
 
-    source_code_without_target_comment = _strip_target_comment(
-        source_code, comment_data, unmodified_comment
-    )
+    diff_hunk = _scope_diff(diff, source_code, comment_data)
 
-    anchor_line_no = _anchor_line_no(comment_data, source_code_without_target_comment)
-
-    scope_code = _scope_code(source_code_without_target_comment, anchor_line_no)
-
-    diff_hunk = _stripped_relevant_hunk(
-        diff, comment_data["start_line"], comment_data["end_line"]
-    )
-
-    prompt = _build_prompt(
-        filepath, comment_data, scope_code, diff_hunk, unmodified_comment
-    )
+    prompt = _build_prompt(filepath, comment_data, diff_hunk, unmodified_comment)
 
     results = _run_models_concurrently(
         prompt, filepath, source_code, comment_data, model_profile
@@ -504,7 +492,6 @@ def _comment_generation(
         "anchor": comment_data.get("anchor"),
         "comment": comment_data.get("comment"),
         "unmodified_comment": unmodified_comment,
-        "scope_code": scope_code,
         "diff_hunk": diff_hunk,
         "results": results,
     }

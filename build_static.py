@@ -13,16 +13,13 @@ from pathlib import Path
 
 from runs import require_latest_run_directory
 
-# Prompts wrap the file scope and the diff in XML-ish tags. Convert them to
-# fenced markdown code blocks so the dashboard can syntax-highlight them.
-_SCOPE_RE = re.compile(r"<scope[^>]*>\s*\n(.*?)\n\s*</scope>", re.DOTALL)
+# The prompt wraps the diff in an XML-ish tag. Convert it to a fenced markdown
+# code block so the dashboard can syntax-highlight it.
 _CHANGE_RE = re.compile(r"<change>\s*\n(.*?)\n\s*</change>", re.DOTALL)
 
 
 def _prompt_to_markdown(prompt: str) -> str:
-    prompt = _SCOPE_RE.sub(lambda m: f"```python\n{m.group(1)}\n```", prompt)
-    prompt = _CHANGE_RE.sub(lambda m: f"```diff\n{m.group(1)}\n```", prompt)
-    return prompt
+    return _CHANGE_RE.sub(lambda m: f"```diff\n{m.group(1)}\n```", prompt)
 
 TEMPLATE_PATH = Path(__file__).parent / "static_template.html"
 DEFAULT_OUTPUT = Path(__file__).parent / "dist" / "index.html"

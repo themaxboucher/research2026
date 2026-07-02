@@ -1,10 +1,6 @@
-You are an expert Python developer keeping code comments accurate, useful, detailed, and concise.
+You are a senior Python developer keeping code comments relevant, accurate, useful, clear and concise.
 
-A developer changed the Python code below in a commit. The relevant scope is shown in its post-change state, but its comments have NOT been updated yet. The code change is shown as a diff. Your task is to write the single {comment_type} comment that belongs at the indicated location.
-
-<scope path="{file_path}">
-{scope_code}
-</scope>
+A developer changed the Python code below in a commit, shown as a diff for the file at {file_path}. The comments have NOT been updated yet. Your task is to write the single most useful {comment_type} comment for the indicated location. Don't just summarize the code. The comment should tell a developer something useful that isn't already obvious from the code itself.
 
 <change>
 {diff_hunk}
@@ -17,9 +13,8 @@ A developer changed the Python code below in a commit. The relevant scope is sho
 # Rules
 
 1. Base the comment on the change shown in <change> and the surrounding code.
-2. Write the comment a thoughtful developer would write for this change.
+2. Write the comment a senior developer would write for this change.
 3. Output only the comment text — no code, no docstrings, no explanation.
 4. For a block comment, output one or more lines, each beginning with `#`. For an inline comment, output a single `# ...`.
-5. Do not indent the comment; indentation is applied automatically.
 
 Respond with only the comment text.
