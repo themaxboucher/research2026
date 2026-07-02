@@ -2,9 +2,11 @@ import argparse
 import difflib
 import json
 import logging
+import re
 import socket
 import sys
 import webbrowser
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +16,7 @@ from runs import require_latest_run_directory
 
 DATASET_FILENAME = "repo_files_sample"
 GENERATED_FILENAME = "files_generated"
+NOTES_FILENAME = "review_notes.json"
 DASHBOARD_HTML = Path(__file__).parent / "dashboard.html"
 DEFAULT_PAGE_LIMIT = 200
 MAX_PAGE_LIMIT = 1000
@@ -309,6 +312,104 @@ def _query_records(ordered_sidebar: list[dict], params: dict[str, list[str]]) ->
     return {"rows": matched[offset : offset + limit], "total": len(matched)}
 
 
+# --- Generations analysis view -------------------------------------------
+# The "Generations" view is a flat comparison of every comment-generation
+# target: the prompt sent to the models, the human's comment, and each model's
+# generated comment side by side. Built once from files_generated.jsonl and
+# cached; served to the client as a single JSON payload.
+
+# The prompt wraps the diff in an XML-ish tag. Convert it to a fenced markdown
+# code block so the client can syntax-highlight it.
+_CHANGE_RE = re.compile(r"<change>\s*\n(.*?)\n\s*</change>", re.DOTALL)
+
+
+def _prompt_to_markdown(prompt: str) -> str:
+    return _CHANGE_RE.sub(lambda m: f"```diff\n{m.group(1)}\n```", prompt)
+
+
+def _short_model_name(model: str) -> str:
+    return model.split("/")[-1] if model else "(unknown)"
+
+
+def _trim_target(record: dict, generation: dict) -> dict:
+    """Pull just the fields needed for the comparison view."""
+    results = []
+    prompt_text = ""
+    for result in generation.get("results") or []:
+        if not prompt_text and result.get("prompt"):
+            prompt_text = result["prompt"]
+        results.append(
+            {
+                "model": _short_model_name(result.get("model") or ""),
+                "comment": result.get("comment_text") or "",
+                "error": result.get("error"),
+            }
+        )
+
+    repo = record.get("repo_name") or ""
+    commit = (record.get("commit_hash") or "")[:7]
+    path = record.get("new_path") or record.get("filename") or ""
+    type_ = generation.get("type") or ""
+    start_line = generation.get("start_line")
+    end_line = generation.get("end_line")
+    # Stable identity for attaching review notes, robust to list reordering.
+    key = "|".join(
+        str(part) for part in (repo, commit, path, type_, start_line, end_line)
+    )
+
+    return {
+        "key": key,
+        "repo": repo,
+        "commit": commit,
+        "path": path,
+        "type": type_,
+        "status": generation.get("status") or "",
+        "anchor": generation.get("anchor") or "",
+        "start_line": start_line,
+        "end_line": end_line,
+        "prompt": _prompt_to_markdown(prompt_text),
+        "human": generation.get("comment") or "",
+        "results": results,
+    }
+
+
+def _collect_targets(generated_path: Path) -> tuple[list[dict], set[str]]:
+    targets: list[dict] = []
+    models: set[str] = set()
+    with generated_path.open("r", encoding="utf-8") as source_file:
+        for raw_line in source_file:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                record = json.loads(stripped)
+            except ValueError:
+                logging.warning("Skipping unparseable line in %s", generated_path)
+                continue
+            for generation in record.get("comment_generations") or []:
+                target = _trim_target(record, generation)
+                for result in target["results"]:
+                    if result["model"]:
+                        models.add(result["model"])
+                targets.append(target)
+    return targets, models
+
+
+def _build_generations_payload(generated_path: Path, source_name: str) -> dict:
+    targets, models = _collect_targets(generated_path)
+    logging.info(
+        "Built generations view: %d targets across %d models",
+        len(targets),
+        len(models),
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": source_name,
+        "models": sorted(models),
+        "targets": targets,
+    }
+
+
 def _make_handler(
     html_bytes: bytes,
     source_path: Path,
@@ -316,6 +417,8 @@ def _make_handler(
     sidebar: list[dict],
     ordered_sidebar: list[dict],
     meta: dict,
+    run_dir: Path,
+    generations_cache: dict,
 ):
     class DashboardHandler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -352,6 +455,34 @@ def _make_handler(
                 self._send_json(_query_records(ordered_sidebar, parse_qs(parsed.query)))
                 return
 
+            if path == "/generations":
+                if generated_path is None:
+                    self._send_json(
+                        {
+                            "generated_at": datetime.now(timezone.utc).isoformat(
+                                timespec="seconds"
+                            ),
+                            "source": run_dir.name,
+                            "models": [],
+                            "targets": [],
+                        }
+                    )
+                    return
+                payload = generations_cache.get("payload")
+                if payload is None:
+                    payload = _build_generations_payload(generated_path, run_dir.name)
+                    generations_cache["payload"] = payload
+                self._send_json(payload)
+                return
+
+            if path == "/notes":
+                notes_path = run_dir / NOTES_FILENAME
+                if notes_path.exists():
+                    self._send_json(json.loads(notes_path.read_text(encoding="utf-8")))
+                else:
+                    self._send_json({"run": run_dir.name, "entries": {}})
+                return
+
             if path.startswith("/records/"):
                 try:
                     index = int(path[len("/records/") :])
@@ -368,6 +499,38 @@ def _make_handler(
                 else:
                     record = _read_record(source_path, entry["offset"])
                 self._send_json(record)
+                return
+
+            self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+        def do_POST(self):
+            parsed = urlparse(self.path)
+            path = unquote(parsed.path)
+
+            if path == "/notes":
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                except ValueError:
+                    self._send_json({"error": "invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                    return
+                saved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                payload = {
+                    "run": run_dir.name,
+                    "saved_at": saved_at,
+                    "entries": body.get("entries") or {},
+                }
+                notes_path = run_dir / NOTES_FILENAME
+                notes_path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                logging.info(
+                    "Saved %d review entries to %s",
+                    len(payload["entries"]),
+                    notes_path,
+                )
+                self._send_json({"ok": True, "saved_at": saved_at})
                 return
 
             self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
@@ -392,11 +555,20 @@ def serve(run_dir: Path, port: int | None, open_browser: bool) -> None:
             "Matched %d of %d generated records", matched, len(generated_entries)
         )
     ordered_sidebar = _display_order(sidebar)
+    meta["has_generations"] = generated_path is not None
 
     html_bytes = DASHBOARD_HTML.read_bytes()
     chosen_port = port if port is not None else _pick_free_port()
+    generations_cache: dict = {}
     handler_class = _make_handler(
-        html_bytes, source_path, generated_path, sidebar, ordered_sidebar, meta
+        html_bytes,
+        source_path,
+        generated_path,
+        sidebar,
+        ordered_sidebar,
+        meta,
+        run_dir,
+        generations_cache,
     )
     server = ThreadingHTTPServer(("127.0.0.1", chosen_port), handler_class)
     url = f"http://127.0.0.1:{chosen_port}/"

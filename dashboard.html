@@ -14,6 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html-ui.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
       :root {
         --bg: #0d1117;
@@ -34,6 +35,11 @@
         --chip-default-fg: #8b949e;
         --comment-marker: #d29922;
         --border-muted: #21262d;
+        --bg-sunken: #010409;
+        --human: #3fb950;
+        --model: #bc8cff;
+        --chip-error: rgba(248, 81, 73, 0.15);
+        --chip-error-fg: #f85149;
       }
       ::-webkit-scrollbar {
         width: 12px;
@@ -49,6 +55,15 @@
       }
       * {
         box-sizing: border-box;
+      }
+      /* Inline SVG icons scale with the surrounding font-size and inherit its
+         color via stroke="currentColor". */
+      .icon {
+        width: 1em;
+        height: 1em;
+        display: inline-block;
+        vertical-align: -0.125em;
+        flex-shrink: 0;
       }
       html,
       body {
@@ -185,6 +200,14 @@
         white-space: nowrap;
         direction: rtl;
         text-align: left;
+      }
+      ul.records li.repo-header a.repo-name {
+        color: var(--text);
+        text-decoration: none;
+      }
+      ul.records li.repo-header a.repo-name:hover {
+        color: var(--accent);
+        text-decoration: underline;
       }
       ul.records li.repo-header .repo-count {
         margin-left: auto;
@@ -585,7 +608,7 @@
       }
       /* Mark the comment's own lines within the rendered hunk. Inset border
          instead of a background so it doesn't fight diff2html's add/del tints. */
-      .cd-hunk .d2h-code-side-line.cmt-hl {
+      .cd-hunk .d2h-code-line.cmt-hl {
         box-shadow: inset 3px 0 0 var(--accent);
       }
 
@@ -666,9 +689,507 @@
       .d2h-file-wrapper {
         position: relative;
       }
-      .d2h-code-line,
-      .d2h-code-side-line {
+      .d2h-code-line {
         line-height: 1.6;
+      }
+
+      /* ===== Header view toggle ===== */
+      .view-toggle {
+        margin-left: auto;
+        display: flex;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        align-self: center;
+      }
+      .view-toggle button {
+        background: var(--bg);
+        border: none;
+        color: var(--text-muted);
+        padding: 6px 14px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .view-toggle button + button {
+        border-left: 1px solid var(--border);
+      }
+      .view-toggle button:hover {
+        color: var(--text);
+      }
+      .view-toggle button.active {
+        background: var(--accent);
+        color: #fff;
+      }
+      .gen-search {
+        align-self: center;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 12px;
+        font-size: 13px;
+        width: 260px;
+      }
+      .gen-search::placeholder {
+        color: var(--text-muted);
+      }
+
+      /* ===== Generations analysis view (ported from static_template.html,
+         scoped under .gen-view so it can't collide with the full-data view) ===== */
+      .gen-view {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        background: var(--bg);
+      }
+      .gen-view .gen-inner {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 28px 24px 40px;
+      }
+      .gen-view .target-card {
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-bottom: 28px;
+        overflow: hidden;
+      }
+      .gen-view .card-header {
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .gen-view .card-header:hover {
+        background: var(--bg-subtle);
+      }
+      .gen-view .target-card.collapsed .card-header {
+        border-bottom: none;
+      }
+      .gen-view .card-toggle {
+        color: var(--text-muted);
+        flex-shrink: 0;
+        margin-top: 2px;
+        transition: transform 0.15s ease;
+      }
+      .gen-view .target-card.collapsed .card-toggle {
+        transform: rotate(-90deg);
+      }
+      .gen-view .target-card.collapsed .card-body {
+        display: none;
+      }
+      .gen-view .ch-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .gen-view .ch-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .gen-view .ch-chips {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .gen-view .ch-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+      }
+      .gen-view .ch-meta:empty {
+        display: none;
+      }
+      .gen-view .card-header .repo {
+        font-weight: 600;
+        color: var(--text);
+        flex-shrink: 0;
+      }
+      .gen-view .card-header a.repo {
+        text-decoration: none;
+      }
+      .gen-view .card-header a.repo:hover {
+        color: var(--accent);
+        text-decoration: underline;
+      }
+      .gen-view .card-header .commit {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .gen-view .card-header .path {
+        color: var(--text-muted);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .gen-view .card-header .lines {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12px;
+        color: var(--text-muted);
+        flex-shrink: 0;
+      }
+      .gen-view .gchip {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .gen-view .gchip.inline,
+      .gen-view .gchip.block,
+      .gen-view .gchip.docstring {
+        background: rgba(56, 139, 253, 0.15);
+        color: #58a6ff;
+      }
+      .gen-view .gchip.added {
+        background: var(--chip-add);
+        color: var(--chip-add-fg);
+      }
+      .gen-view .gchip.modified {
+        background: var(--chip-modify);
+        color: var(--chip-modify-fg);
+      }
+      .gen-view .section-label {
+        padding: 12px 20px 8px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .gen-view .section-label .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      .gen-view .section-label .dot.human {
+        background: var(--human);
+      }
+      .gen-view .section-label .dot.model {
+        background: var(--model);
+      }
+      .gen-view .prompt-wrap {
+        padding: 0 20px 14px;
+      }
+      .gen-view .prompt-body {
+        background: var(--bg-sunken);
+        border: 1px solid var(--border-muted);
+        border-radius: 8px;
+        padding: 16px 20px;
+        font-size: 13.5px;
+        line-height: 1.65;
+        color: var(--text);
+        overflow-x: auto;
+      }
+      .gen-view .prompt-body p {
+        margin: 0 0 12px;
+      }
+      .gen-view .prompt-body p:last-child {
+        margin-bottom: 0;
+      }
+      .gen-view .prompt-body h1,
+      .gen-view .prompt-body h2,
+      .gen-view .prompt-body h3 {
+        margin: 18px 0 10px;
+        font-weight: 600;
+        color: var(--text);
+        border-bottom: 1px solid var(--border-muted);
+        padding-bottom: 4px;
+      }
+      .gen-view .prompt-body h1 {
+        font-size: 15px;
+      }
+      .gen-view .prompt-body h2 {
+        font-size: 14px;
+      }
+      .gen-view .prompt-body h3 {
+        font-size: 13px;
+      }
+      .gen-view .prompt-body h1:first-child,
+      .gen-view .prompt-body h2:first-child,
+      .gen-view .prompt-body h3:first-child {
+        margin-top: 0;
+      }
+      .gen-view .prompt-body ol,
+      .gen-view .prompt-body ul {
+        margin: 0 0 12px;
+        padding-left: 22px;
+      }
+      .gen-view .prompt-body li {
+        margin: 3px 0;
+      }
+      .gen-view .prompt-body :not(pre) > code {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        background: rgba(110, 118, 129, 0.2);
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 0.92em;
+        color: #f0883e;
+      }
+      .gen-view .prompt-body pre {
+        margin: 12px 0;
+        padding: 0;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .gen-view .prompt-body pre > code.hljs {
+        display: block;
+        padding: 12px 14px;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+        background: var(--bg);
+        white-space: pre;
+        overflow-x: auto;
+      }
+      /* The change-block diff is rendered by diff2html (like the full-data
+         view) for a GitHub-style review look. Cap its height so a long hunk
+         doesn't blow out the card; it scrolls internally. */
+      .gen-view .gen-diff {
+        margin: 12px 0;
+        max-height: 480px;
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      .gen-view .gen-diff .d2h-wrapper {
+        padding: 0;
+      }
+      .gen-view .comments-grid {
+        padding: 4px 20px 20px;
+        display: grid;
+        gap: 14px;
+      }
+      .gen-view .comment-block {
+        background: var(--bg-sunken);
+        border: 1px solid var(--border-muted);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .gen-view .comment-block.human {
+        border-color: rgba(63, 185, 80, 0.35);
+      }
+      .gen-view .comment-block.model {
+        border-color: rgba(188, 140, 255, 0.3);
+      }
+      .gen-view .comment-block .cb-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border-muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .gen-view .comment-block.human .cb-head {
+        background: rgba(63, 185, 80, 0.08);
+        color: var(--human);
+      }
+      .gen-view .comment-block.model .cb-head {
+        background: rgba(188, 140, 255, 0.08);
+        color: var(--model);
+      }
+      .gen-view .comment-block pre {
+        margin: 0;
+        padding: 12px 14px;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--text);
+        background: var(--bg-sunken);
+      }
+      .gen-view .comment-block.error pre {
+        color: var(--chip-error-fg);
+      }
+      .gen-view .comment-block.error .cb-head {
+        background: var(--chip-error);
+        color: var(--chip-error-fg);
+      }
+      .gen-view .gen-empty {
+        padding: 80px 20px;
+        text-align: center;
+        color: var(--text-muted);
+      }
+      .gen-view .gen-empty h2 {
+        margin: 0 0 8px;
+        color: var(--text);
+        font-size: 16px;
+      }
+      .gen-view .anchor-pill {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 2px 7px;
+        color: var(--text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 220px;
+        display: inline-block;
+        vertical-align: middle;
+      }
+      .gen-view .gen-footer {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        padding: 20px;
+        border-top: 1px solid var(--border-muted);
+      }
+      /* Reading-position rail: one block per card, pinned to the right edge,
+         with the block for the card in view highlighted. */
+      .gen-view .gen-progress {
+        position: fixed;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        z-index: 20;
+        max-height: 80vh;
+        overflow-y: auto;
+        padding: 6px;
+        scrollbar-width: none;
+      }
+      .gen-view .gen-progress::-webkit-scrollbar {
+        display: none;
+      }
+      .gen-view .gen-progress .pblock {
+        width: 18px;
+        height: 6px;
+        flex-shrink: 0;
+        border: none;
+        padding: 0;
+        border-radius: 2px;
+        background: #484f58;
+        cursor: pointer;
+        transition:
+          background 0.12s ease,
+          transform 0.12s ease;
+      }
+      .gen-view .gen-progress .pblock:hover {
+        transform: scaleX(1.25);
+      }
+      /* Reviewed = green fill; current scroll position = accent ring on top,
+         so a block can show both at once. */
+      .gen-view .gen-progress .pblock.reviewed {
+        background: var(--chip-add-fg);
+      }
+      .gen-view .gen-progress .pblock.active {
+        box-shadow: 0 0 0 2px var(--accent);
+      }
+
+      /* ===== Review checkbox, notes, save button ===== */
+      .gen-view .review-check {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+        margin-top: 1px;
+        font-size: 12px;
+        color: var(--text-muted);
+        cursor: pointer;
+        user-select: none;
+      }
+      .gen-view .review-check input {
+        cursor: pointer;
+        accent-color: var(--chip-add-fg);
+      }
+      .gen-view .target-card.reviewed {
+        border-color: rgba(63, 185, 80, 0.5);
+      }
+      .gen-view .target-card.reviewed .card-header {
+        background: rgba(63, 185, 80, 0.08);
+      }
+      .gen-view .target-card.reviewed .card-header:hover {
+        background: rgba(63, 185, 80, 0.13);
+      }
+      .gen-view .target-card.reviewed .review-check {
+        color: var(--chip-add-fg);
+        font-weight: 600;
+      }
+      .gen-view .note-input {
+        width: 100%;
+        margin-top: 8px;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-family: inherit;
+        font-size: 12.5px;
+        line-height: 1.5;
+        resize: vertical;
+        min-height: 38px;
+      }
+      .gen-view .note-input::placeholder {
+        color: var(--text-muted);
+      }
+      .gen-view .note-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .gen-view .model-note-wrap {
+        padding: 0 12px 12px;
+      }
+      .gen-view .model-note-wrap .note-input {
+        margin-top: 0;
+      }
+      .gen-review-count {
+        align-self: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        white-space: nowrap;
+      }
+      .gen-save {
+        align-self: center;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 7px 14px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .gen-save:hover {
+        filter: brightness(1.08);
+      }
+      .gen-save:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .gen-save.clean {
+        background: var(--bg);
+        color: var(--text-muted);
+        border: 1px solid var(--border);
+      }
+      .gen-save.dirty::after {
+        content: "•";
+        margin-left: 6px;
       }
     </style>
   </head>
@@ -676,6 +1197,30 @@
     <header class="topbar">
       <h1>Research Dashboard</h1>
       <span class="meta" id="dataset-meta"></span>
+      <div class="view-toggle" id="view-toggle" style="display: none">
+        <button data-view="data" class="active">Full data</button>
+        <button data-view="gen">Generations</button>
+      </div>
+      <input
+        type="text"
+        id="gen-search"
+        class="gen-search"
+        placeholder="Filter by repo, path, or comment text"
+        style="display: none"
+      />
+      <span
+        id="gen-review-count"
+        class="gen-review-count"
+        style="display: none"
+      ></span>
+      <button
+        type="button"
+        id="gen-save"
+        class="gen-save clean"
+        style="display: none"
+      >
+        Saved
+      </button>
     </header>
     <main>
       <aside class="sidebar">
@@ -699,6 +1244,14 @@
       </section>
     </main>
 
+    <div class="gen-view" id="gen-view" style="display: none">
+      <div class="gen-progress" id="gen-progress" aria-hidden="true"></div>
+      <div class="gen-inner" id="gen-root"></div>
+      <footer class="gen-footer">
+        <span id="gen-count"></span> · built from <span id="gen-source"></span>
+      </footer>
+    </div>
+
     <script>
       const TABS = [
         { id: "diff", label: "Diff" },
@@ -709,6 +1262,27 @@
       ];
 
       const PAGE_SIZE = 200;
+
+      // Minimal inline SVG icons (Feather, MIT-licensed). Inlined as strings
+      // rather than pulled from a runtime icon library so they work with the
+      // dashboard's dynamically-built DOM without a re-scan step.
+      const ICON_PATHS = {
+        zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+        "alert-triangle":
+          '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+        "arrow-left":
+          '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
+        "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
+      };
+
+      function iconSvg(name, extraClass = "") {
+        const cls = extraClass ? `icon ${extraClass}` : "icon";
+        return (
+          `<svg class="${cls}" viewBox="0 0 24 24" fill="none" ` +
+          'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+          `stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]}</svg>`
+        );
+      }
 
       const state = {
         rows: [],
@@ -737,6 +1311,9 @@
         document.getElementById("dataset-meta").textContent =
           `${meta.count} records across ${meta.repo_count} repos · ${meta.comment_count} comments (${meta.sidebar_comment_count} added/modified inline/block)`;
         state.changeTypes = meta.change_types || [];
+        if (meta.has_generations) {
+          document.getElementById("view-toggle").style.display = "flex";
+        }
         initChangeTypeFilters();
         await reloadRecords();
       }
@@ -748,7 +1325,7 @@
 
         const genLabel = document.createElement("label");
         genLabel.className = "gen-filter";
-        genLabel.textContent = "⚡ generated only";
+        genLabel.innerHTML = `${iconSvg("zap")} generated only`;
         genLabel.addEventListener("click", () => {
           state.genOnly = !state.genOnly;
           genLabel.classList.toggle("active", state.genOnly);
@@ -830,7 +1407,7 @@
         const header = document.createElement("li");
         header.className = "repo-header";
         header.innerHTML = `
-    <span class="repo-name" title="${escapeHTML(repo)}">${escapeHTML(repo)}</span>
+    ${repoLink(repo, "repo-name")}
     <span class="repo-count"></span>
   `;
         list.appendChild(header);
@@ -926,7 +1503,7 @@
           if (c.generation_model_count != null) {
             const gen = document.createElement("span");
             gen.className = "gen-badge";
-            gen.textContent = `⚡${c.generation_model_count}`;
+            gen.innerHTML = `${iconSvg("zap")}${c.generation_model_count}`;
             gen.title = `Generated by ${c.generation_model_count} model${
               c.generation_model_count === 1 ? "" : "s"
             }`;
@@ -1070,7 +1647,7 @@
         const ui = new Diff2HtmlUI(panel, unified, {
           drawFileList: false,
           matching: "lines",
-          outputFormat: "side-by-side",
+          outputFormat: "line-by-line",
           highlight: true,
           colorScheme: "dark",
         });
@@ -1213,14 +1790,14 @@
       }
 
       function highlightCommentLines(container, comment) {
-        const sides = container.querySelectorAll(".d2h-file-side-diff");
-        const newSide = sides[sides.length - 1];
-        if (!newSide) return;
-        for (const row of newSide.querySelectorAll("tr")) {
-          const numCell = row.querySelector(".d2h-code-side-linenumber");
-          const codeCell = row.querySelector(".d2h-code-side-line");
-          if (!numCell || !codeCell) continue;
-          const n = parseInt(numCell.textContent.trim(), 10);
+        // Unified (line-by-line) rows carry the new-file line number in
+        // `.line-num2` (empty for deleted lines); mark code cells in range.
+        for (const row of container.querySelectorAll("tr")) {
+          const codeCell = row.querySelector("td.d2h-code-line");
+          const newNumCell = row.querySelector(".line-num2");
+          if (!codeCell || !newNumCell) continue;
+          const n = parseInt(newNumCell.textContent.trim(), 10);
+          if (Number.isNaN(n)) continue;
           if (n >= comment.start_line && n <= comment.end_line) {
             codeCell.classList.add("cmt-hl");
           }
@@ -1236,7 +1813,7 @@
         const backBar = document.createElement("div");
         backBar.className = "detail-back-bar";
         const backButton = document.createElement("button");
-        backButton.textContent = "← Back to comments";
+        backButton.innerHTML = `${iconSvg("arrow-left")} Back to comments`;
         backButton.addEventListener("click", () => {
           state.commentDetail = null;
           renderActiveTab();
@@ -1340,7 +1917,7 @@
         const ui = new Diff2HtmlUI(diffContainer, buildHunkDiff(path, hunks), {
           drawFileList: false,
           matching: "lines",
-          outputFormat: "side-by-side",
+          outputFormat: "line-by-line",
           highlight: true,
           colorScheme: "dark",
         });
@@ -1352,10 +1929,9 @@
       // Mark every inserted (new-side) line in a model's diff hunk. Since the
       // model only swaps the comment, those lines are exactly its comment.
       function highlightInsertedLines(container) {
-        const sides = container.querySelectorAll(".d2h-file-side-diff");
-        const newSide = sides[sides.length - 1];
-        if (!newSide) return;
-        for (const codeCell of newSide.querySelectorAll(".d2h-code-side-line.d2h-ins")) {
+        for (const codeCell of container.querySelectorAll(
+          "td.d2h-code-line.d2h-ins",
+        )) {
           codeCell.classList.add("cmt-hl");
         }
       }
@@ -1368,7 +1944,7 @@
         const details = document.createElement("details");
         details.className = "gen-prompt";
         const summary = document.createElement("summary");
-        summary.textContent = "Prompt sent to models";
+        summary.textContent = "Prompt";
         const pre = document.createElement("pre");
         pre.textContent = promptText;
         details.append(summary, pre);
@@ -1416,7 +1992,9 @@
             block.innerHTML = `<div class="cd-sub">${escapeHTML(modelName)}</div>`;
             const banner = document.createElement("div");
             banner.className = "gen-error-banner";
-            banner.textContent = `⚠️ ${result.error || "No comment generated."}`;
+            banner.innerHTML = `${iconSvg("alert-triangle")} ${escapeHTML(
+              result.error || "No comment generated.",
+            )}`;
             block.appendChild(banner);
             panel.appendChild(block);
             continue;
@@ -1466,6 +2044,22 @@
           .replace(/"/g, "&quot;");
       }
 
+      // Render an owner/repo name as a link to its GitHub repo. Falls back to a
+      // plain span when the name isn't a recognizable owner/repo slug.
+      function repoLink(repoName, className) {
+        const safe = escapeHTML(repoName);
+        if (repoName && repoName.includes("/") && repoName !== "(no repo)") {
+          const href =
+            "https://github.com/" +
+            repoName.split("/").map(encodeURIComponent).join("/");
+          return (
+            `<a class="${className}" href="${escapeHTML(href)}" ` +
+            `target="_blank" rel="noopener noreferrer" title="${safe}">${safe}</a>`
+          );
+        }
+        return `<span class="${className}" title="${safe}">${safe}</span>`;
+      }
+
       let searchTimer = null;
       document.getElementById("search").addEventListener("input", (event) => {
         state.search = event.target.value;
@@ -1481,6 +2075,503 @@
             loadMoreRecords();
           }
         });
+
+      // ===== Generations analysis view =====
+      // Ported from static_template.html. Data is fetched once from
+      // /generations on the first switch and cached; the whole comparison
+      // list is rendered client-side and filtered by the header search box.
+      const gen = {
+        loaded: false,
+        markedReady: false,
+        data: null,
+        query: "",
+        notes: {},
+        dirty: false,
+        cardByKey: {},
+        blockByKey: {},
+      };
+
+      function setView(view) {
+        const isGen = view === "gen";
+        document.querySelector("main").style.display = isGen ? "none" : "";
+        document.getElementById("gen-view").style.display = isGen ? "" : "none";
+        for (const id of ["gen-search", "gen-review-count", "gen-save"]) {
+          document.getElementById(id).style.display = isGen ? "" : "none";
+        }
+        for (const button of document.querySelectorAll("#view-toggle button")) {
+          button.classList.toggle("active", button.dataset.view === view);
+        }
+        if (isGen) ensureGenerations();
+      }
+
+      async function ensureGenerations() {
+        if (gen.loaded) return;
+        gen.loaded = true;
+        configureMarked();
+        const [genResponse, notesResponse] = await Promise.all([
+          fetch("/generations"),
+          fetch("/notes"),
+        ]);
+        gen.data = await genResponse.json();
+        gen.notes = (await notesResponse.json()).entries || {};
+        gen.dirty = false;
+        renderGenerations();
+        updateSaveButton();
+        updateReviewCount();
+      }
+
+      // Notes/review state is keyed by target.key. Read with a safe default at
+      // render time; create the backing entry only when the user edits.
+      function noteEntry(key) {
+        let entry = gen.notes[key];
+        if (!entry) {
+          entry = { reviewed: false, note: "", model_notes: {} };
+          gen.notes[key] = entry;
+        }
+        if (!entry.model_notes) entry.model_notes = {};
+        return entry;
+      }
+
+      function markDirty() {
+        gen.dirty = true;
+        updateSaveButton();
+      }
+
+      function updateSaveButton() {
+        const button = document.getElementById("gen-save");
+        button.classList.toggle("dirty", gen.dirty);
+        button.classList.toggle("clean", !gen.dirty);
+        button.textContent = gen.dirty ? "Save" : "Saved";
+      }
+
+      function updateReviewCount() {
+        const targets = gen.data ? gen.data.targets : [];
+        let reviewed = 0;
+        for (const target of targets) {
+          const entry = gen.notes[target.key];
+          if (entry && entry.reviewed) reviewed += 1;
+        }
+        document.getElementById("gen-review-count").textContent =
+          `${reviewed}/${targets.length} reviewed`;
+      }
+
+      async function saveNotes() {
+        if (!gen.loaded) return;
+        const entries = {};
+        for (const [key, entry] of Object.entries(gen.notes)) {
+          const modelNotes = {};
+          for (const [model, text] of Object.entries(entry.model_notes || {})) {
+            if (text && text.trim()) modelNotes[model] = text;
+          }
+          const hasContent =
+            entry.reviewed ||
+            (entry.note && entry.note.trim()) ||
+            Object.keys(modelNotes).length > 0;
+          if (!hasContent) continue;
+          entries[key] = {
+            reviewed: !!entry.reviewed,
+            note: entry.note || "",
+            model_notes: modelNotes,
+          };
+        }
+        const button = document.getElementById("gen-save");
+        button.disabled = true;
+        try {
+          const response = await fetch("/notes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ entries }),
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          gen.dirty = false;
+          updateSaveButton();
+        } catch (error) {
+          alert("Failed to save notes: " + error.message);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      // Configure marked once; ask highlight.js to colorize each fenced code
+      // block using its declared language (the server emits ```python and
+      // ```diff for prompts).
+      function configureMarked() {
+        if (gen.markedReady) return;
+        gen.markedReady = true;
+        marked.setOptions({
+          gfm: true,
+          breaks: false,
+          highlight: (code, lang) => {
+            if (!lang) return escapeHTML(code);
+            try {
+              return hljs.highlight(code, { language: lang, ignoreIllegals: true })
+                .value;
+            } catch {
+              return escapeHTML(code);
+            }
+          },
+        });
+      }
+
+      function genLineLabel(target) {
+        if (target.start_line == null) return "";
+        if (target.start_line === target.end_line) return `L${target.start_line}`;
+        return `L${target.start_line}-${target.end_line}`;
+      }
+
+      function renderPrompt(container, target) {
+        if (!target.prompt) {
+          container.innerHTML = `<div class="gen-empty" style="padding:24px;">No prompt available.</div>`;
+          return;
+        }
+        const body = document.createElement("div");
+        body.className = "prompt-body";
+        body.innerHTML = marked.parse(target.prompt);
+        // marked's highlight option fills the inner HTML but doesn't set the
+        // language class hljs needs for its themed selectors; add it.
+        for (const codeEl of body.querySelectorAll("pre > code")) {
+          if (!codeEl.classList.contains("hljs")) codeEl.classList.add("hljs");
+        }
+        renderPromptDiffs(body, target);
+        container.appendChild(body);
+      }
+
+      // The <change> tag is emitted as a ```diff fenced block. Replace each one
+      // with a diff2html render so it reads like a GitHub PR review. The change
+      // block is a bare hunk (no file header); synthesize one from the target's
+      // path, the same way the full-data view does.
+      function renderPromptDiffs(body, target) {
+        const path = target.path || "file.py";
+        for (const codeEl of body.querySelectorAll("pre > code.language-diff")) {
+          const pre = codeEl.closest("pre");
+          if (!pre) continue;
+          const unified =
+            `diff --git a/${path} b/${path}\n` +
+            `--- a/${path}\n+++ b/${path}\n` +
+            codeEl.textContent;
+          const container = document.createElement("div");
+          container.className = "gen-diff";
+          const ui = new Diff2HtmlUI(container, unified, {
+            drawFileList: false,
+            matching: "lines",
+            outputFormat: "line-by-line",
+            highlight: true,
+            colorScheme: "dark",
+          });
+          ui.draw();
+          ui.highlightCode();
+          pre.replaceWith(container);
+        }
+      }
+
+      function genCommentBlock(kind, label, text, error) {
+        const block = document.createElement("div");
+        block.className = "comment-block " + kind + (error ? " error" : "");
+        const head = document.createElement("div");
+        head.className = "cb-head";
+        head.textContent = label;
+        const pre = document.createElement("pre");
+        if (error) {
+          pre.innerHTML = `${iconSvg("alert-triangle")} ${escapeHTML(error)}`;
+        } else {
+          pre.textContent = text || "(empty)";
+        }
+        block.append(head, pre);
+        return block;
+      }
+
+      function buildGenCard(target) {
+        const key = target.key;
+        const entry = gen.notes[key] || {
+          reviewed: false,
+          note: "",
+          model_notes: {},
+        };
+
+        const card = document.createElement("section");
+        card.className = "target-card collapsed" + (entry.reviewed ? " reviewed" : "");
+        card.dataset.key = key;
+        gen.cardByKey[key] = card;
+
+        const repo = repoLink(target.repo || "(no repo)", "repo");
+        const commit = target.commit ? escapeHTML(target.commit) : "";
+        const path = escapeHTML(target.path || "");
+        const lines = escapeHTML(genLineLabel(target));
+        const typeChip = target.type
+          ? `<span class="gchip ${escapeHTML(target.type)}">${escapeHTML(target.type)}</span>`
+          : "";
+        const statusChip = target.status
+          ? `<span class="gchip ${escapeHTML(target.status)}">${escapeHTML(target.status)}</span>`
+          : "";
+        const anchor = target.anchor
+          ? `<span class="anchor-pill" title="${escapeHTML(target.anchor)}">${escapeHTML(target.anchor)}</span>`
+          : "";
+
+        // Header: click to collapse/expand. Top row is repo + path + chips;
+        // the muted meta row carries commit, line range and anchor.
+        const header = document.createElement("div");
+        header.className = "card-header";
+        header.innerHTML = `
+          ${iconSvg("chevron-down", "card-toggle")}
+          <div class="ch-main">
+            <div class="ch-top">
+              ${repo}
+              <span class="path" title="${path}">${path}</span>
+              <span class="ch-chips">${typeChip}${statusChip}</span>
+            </div>
+            <div class="ch-meta">
+              ${commit ? `<span class="commit">@${commit}</span>` : ""}
+              ${lines ? `<span class="lines">${lines}</span>` : ""}
+              ${anchor}
+            </div>
+          </div>
+        `;
+        header.addEventListener("click", (event) => {
+          // Let the repo link work without toggling the card.
+          if (event.target.closest("a")) return;
+          card.classList.toggle("collapsed");
+        });
+
+        // Reviewed checkbox — toggles review state without collapsing the card.
+        const reviewLabel = document.createElement("label");
+        reviewLabel.className = "review-check";
+        const reviewBox = document.createElement("input");
+        reviewBox.type = "checkbox";
+        reviewBox.checked = !!entry.reviewed;
+        reviewLabel.append(reviewBox, document.createTextNode("Reviewed"));
+        reviewLabel.addEventListener("click", (event) => event.stopPropagation());
+        reviewBox.addEventListener("change", () => {
+          noteEntry(key).reviewed = reviewBox.checked;
+          card.classList.toggle("reviewed", reviewBox.checked);
+          const block = gen.blockByKey[key];
+          if (block) block.classList.toggle("reviewed", reviewBox.checked);
+          markDirty();
+          updateReviewCount();
+        });
+        header.appendChild(reviewLabel);
+        card.appendChild(header);
+
+        const body = document.createElement("div");
+        body.className = "card-body";
+        card.appendChild(body);
+
+        const promptLabel = document.createElement("div");
+        promptLabel.className = "section-label";
+        promptLabel.textContent = "Prompt";
+        body.appendChild(promptLabel);
+
+        const promptWrap = document.createElement("div");
+        promptWrap.className = "prompt-wrap";
+        body.appendChild(promptWrap);
+        renderPrompt(promptWrap, target);
+
+        const compareLabel = document.createElement("div");
+        compareLabel.className = "section-label";
+        compareLabel.innerHTML = `
+          <span class="dot human"></span> Human
+          <span style="opacity:0.4; padding:0 6px;">vs</span>
+          <span class="dot model"></span> Models
+        `;
+        body.appendChild(compareLabel);
+
+        const grid = document.createElement("div");
+        grid.className = "comments-grid";
+        grid.appendChild(genCommentBlock("human", "Human", target.human, null));
+        for (const result of target.results || []) {
+          const model = result.model || "(model)";
+          const block = genCommentBlock("model", model, result.comment, result.error);
+          block.appendChild(buildModelNote(key, model, entry));
+          grid.appendChild(block);
+        }
+        body.appendChild(grid);
+
+        // Overall note for the whole change, below the comparison grid.
+        const notesLabel = document.createElement("div");
+        notesLabel.className = "section-label";
+        notesLabel.textContent = "My notes";
+        body.appendChild(notesLabel);
+
+        const notesWrap = document.createElement("div");
+        notesWrap.className = "prompt-wrap";
+        const overall = document.createElement("textarea");
+        overall.className = "note-input overall-note";
+        overall.placeholder = "Overall notes for this change...";
+        overall.value = entry.note || "";
+        overall.addEventListener("input", () => {
+          noteEntry(key).note = overall.value;
+          markDirty();
+        });
+        notesWrap.appendChild(overall);
+        body.appendChild(notesWrap);
+
+        return card;
+      }
+
+      // A per-model note input, shown under that model's generated comment.
+      function buildModelNote(key, model, entry) {
+        const wrap = document.createElement("div");
+        wrap.className = "model-note-wrap";
+        const textarea = document.createElement("textarea");
+        textarea.className = "note-input model-note";
+        textarea.placeholder = `Note on ${model}...`;
+        textarea.value = (entry.model_notes && entry.model_notes[model]) || "";
+        textarea.addEventListener("input", () => {
+          noteEntry(key).model_notes[model] = textarea.value;
+          markDirty();
+        });
+        wrap.appendChild(textarea);
+        return wrap;
+      }
+
+      function genHaystack(target) {
+        const parts = [
+          target.repo,
+          target.path,
+          target.human,
+          target.anchor,
+          target.prompt,
+        ];
+        for (const result of target.results || []) {
+          parts.push(result.comment, result.model);
+        }
+        return parts.filter(Boolean).join(" ").toLowerCase();
+      }
+
+      function renderGenerations() {
+        if (!gen.data) return;
+        const root = document.getElementById("gen-root");
+        root.innerHTML = "";
+        gen.cardByKey = {};
+        gen.blockByKey = {};
+        const query = gen.query.trim().toLowerCase();
+        const filtered = query
+          ? gen.data.targets.filter((t) => genHaystack(t).includes(query))
+          : gen.data.targets;
+
+        const cards = [];
+        if (!filtered.length) {
+          const empty = document.createElement("div");
+          empty.className = "gen-empty";
+          empty.innerHTML = `<h2>No matches</h2><p>Try a different search term.</p>`;
+          root.appendChild(empty);
+        } else {
+          for (const target of filtered) {
+            const card = buildGenCard(target);
+            cards.push(card);
+            root.appendChild(card);
+          }
+        }
+        buildGenProgress(filtered, cards);
+
+        const repoCount = new Set(gen.data.targets.map((t) => t.repo)).size;
+        const modelLabel =
+          gen.data.models.length === 1
+            ? gen.data.models[0]
+            : `${gen.data.models.length} models`;
+        document.getElementById("gen-count").textContent =
+          `${filtered.length}${query ? ` of ${gen.data.targets.length}` : ""} ` +
+          `target${filtered.length === 1 ? "" : "s"} · ` +
+          `${repoCount} repo${repoCount === 1 ? "" : "s"} · ${modelLabel}`;
+        document.getElementById("gen-source").textContent =
+          gen.data.source + " · generated " + gen.data.generated_at;
+      }
+
+      // Build the right-edge reading-position rail: one block per card, each a
+      // shortcut that scrolls its card into view. Hidden when there's nothing
+      // to navigate (0 or 1 card).
+      function buildGenProgress(targets, cards) {
+        const rail = document.getElementById("gen-progress");
+        rail.innerHTML = "";
+        gen.cardEls = cards;
+        gen.blockEls = [];
+        if (cards.length <= 1) {
+          rail.style.display = "none";
+          return;
+        }
+        rail.style.display = "flex";
+        targets.forEach((target, index) => {
+          const block = document.createElement("button");
+          block.type = "button";
+          block.className = "pblock";
+          const entry = gen.notes[target.key];
+          if (entry && entry.reviewed) block.classList.add("reviewed");
+          block.title =
+            (target.repo || "") + (target.path ? " · " + target.path : "");
+          block.addEventListener("click", () => {
+            cards[index].scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+          rail.appendChild(block);
+          gen.blockEls.push(block);
+          gen.blockByKey[target.key] = block;
+        });
+        updateGenProgress();
+      }
+
+      // Highlight the block for the card currently at the top of the view. The
+      // "current" card is the last one whose top has scrolled past a marker
+      // line just below the view's top edge.
+      function updateGenProgress() {
+        if (!gen.blockEls || !gen.blockEls.length) return;
+        const view = document.getElementById("gen-view");
+        const marker = view.getBoundingClientRect().top + 120;
+        let current = 0;
+        for (let i = 0; i < gen.cardEls.length; i++) {
+          if (gen.cardEls[i].getBoundingClientRect().top <= marker) current = i;
+          else break;
+        }
+        // At the very bottom, the last (possibly short) card is what's in view.
+        if (view.scrollTop + view.clientHeight >= view.scrollHeight - 2) {
+          current = gen.cardEls.length - 1;
+        }
+        gen.blockEls.forEach((block, i) =>
+          block.classList.toggle("active", i === current),
+        );
+        // Keep the active block visible if the rail itself overflows.
+        const rail = document.getElementById("gen-progress");
+        const block = gen.blockEls[current];
+        if (rail.scrollHeight > rail.clientHeight) {
+          const top = block.offsetTop;
+          const bottom = top + block.offsetHeight;
+          if (top < rail.scrollTop) rail.scrollTop = top - 4;
+          else if (bottom > rail.scrollTop + rail.clientHeight)
+            rail.scrollTop = bottom - rail.clientHeight + 4;
+        }
+      }
+
+      let genProgressRaf = null;
+      document.getElementById("gen-view").addEventListener("scroll", () => {
+        if (genProgressRaf) return;
+        genProgressRaf = requestAnimationFrame(() => {
+          genProgressRaf = null;
+          updateGenProgress();
+        });
+      });
+
+      for (const button of document.querySelectorAll("#view-toggle button")) {
+        button.addEventListener("click", () => setView(button.dataset.view));
+      }
+
+      let genSearchTimer = null;
+      document.getElementById("gen-search").addEventListener("input", (event) => {
+        gen.query = event.target.value;
+        clearTimeout(genSearchTimer);
+        genSearchTimer = setTimeout(renderGenerations, 150);
+      });
+
+      // One Save button for all notes + review state; Cmd/Ctrl+S does the same.
+      document.getElementById("gen-save").addEventListener("click", saveNotes);
+      window.addEventListener("keydown", (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          saveNotes();
+        }
+      });
+      window.addEventListener("beforeunload", (event) => {
+        if (gen.dirty) {
+          event.preventDefault();
+          event.returnValue = "";
+        }
+      });
 
       loadMeta();
     </script>
