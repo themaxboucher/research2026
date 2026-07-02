@@ -1119,6 +1119,37 @@
         cursor: pointer;
         accent-color: var(--chip-add-fg);
       }
+      .gen-view .ch-actions {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .gen-view .card-copy {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-muted);
+        padding: 5px;
+        line-height: 0;
+        cursor: pointer;
+      }
+      .gen-view .card-copy:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      .gen-view .card-copy.copied {
+        color: var(--chip-add-fg);
+        border-color: var(--chip-add-fg);
+      }
+      .gen-view .card-copy .icon {
+        width: 15px;
+        height: 15px;
+      }
       .gen-view .target-card.reviewed {
         border-color: rgba(63, 185, 80, 0.5);
       }
@@ -1273,6 +1304,8 @@
         "arrow-left":
           '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>',
         "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
+        copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+        check: '<polyline points="20 6 9 17 4 12"/>',
       };
 
       function iconSvg(name, extraClass = "") {
@@ -2332,6 +2365,31 @@
           card.classList.toggle("collapsed");
         });
 
+        const actions = document.createElement("div");
+        actions.className = "ch-actions";
+
+        // Copy a chatbot-ready markdown of the prompt + generations.
+        const copyButton = document.createElement("button");
+        copyButton.type = "button";
+        copyButton.className = "card-copy";
+        copyButton.title = "Copy prompt + generations";
+        copyButton.innerHTML = iconSvg("copy");
+        copyButton.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(genClipboardText(target));
+            copyButton.innerHTML = iconSvg("check");
+            copyButton.classList.add("copied");
+            setTimeout(() => {
+              copyButton.innerHTML = iconSvg("copy");
+              copyButton.classList.remove("copied");
+            }, 1200);
+          } catch (error) {
+            alert("Copy failed: " + error.message);
+          }
+        });
+        actions.appendChild(copyButton);
+
         // Reviewed checkbox — toggles review state without collapsing the card.
         const reviewLabel = document.createElement("label");
         reviewLabel.className = "review-check";
@@ -2348,7 +2406,8 @@
           markDirty();
           updateReviewCount();
         });
-        header.appendChild(reviewLabel);
+        actions.appendChild(reviewLabel);
+        header.appendChild(actions);
         card.appendChild(header);
 
         const body = document.createElement("div");
@@ -2421,6 +2480,37 @@
         });
         wrap.appendChild(textarea);
         return wrap;
+      }
+
+      // Build a clean, chatbot-ready markdown of the prompt + the human's
+      // comment + each model's generation — nothing else (no notes, review
+      // state or scoring). Comment text is fenced so its leading `#` lines
+      // don't render as markdown headings when pasted.
+      function genClipboardText(target) {
+        const fence = (text) => "```text\n" + (text || "") + "\n```";
+        const lines = ["# Code comment generation", ""];
+        if (target.repo) lines.push(`**Repository:** ${target.repo}`);
+        if (target.path) lines.push(`**File:** ${target.path}`);
+        const loc = [
+          target.type ? `${target.type} comment` : "",
+          genLineLabel(target),
+        ]
+          .filter(Boolean)
+          .join(" ");
+        if (loc) lines.push(`**Target:** ${loc}`);
+
+        lines.push("", "## Prompt given to each model", "", target.prompt || "(no prompt)");
+        lines.push("", "## The developer's actual comment", "", fence(target.human || "(none)"));
+        lines.push("", "## Model-generated comments");
+        for (const result of target.results || []) {
+          lines.push("", `### ${result.model || "(model)"}`, "");
+          lines.push(
+            result.error
+              ? fence(`generation error: ${result.error}`)
+              : fence(result.comment || "(empty)"),
+          );
+        }
+        return lines.join("\n") + "\n";
       }
 
       function genHaystack(target) {
