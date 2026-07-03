@@ -480,7 +480,9 @@ def _make_handler(
                 if notes_path.exists():
                     self._send_json(json.loads(notes_path.read_text(encoding="utf-8")))
                 else:
-                    self._send_json({"run": run_dir.name, "entries": {}})
+                    self._send_json(
+                        {"run": run_dir.name, "failure_modes": [], "entries": {}}
+                    )
                 return
 
             if path.startswith("/records/"):
@@ -518,6 +520,7 @@ def _make_handler(
                 payload = {
                     "run": run_dir.name,
                     "saved_at": saved_at,
+                    "failure_modes": body.get("failure_modes") or [],
                     "entries": body.get("entries") or {},
                 }
                 notes_path = run_dir / NOTES_FILENAME
@@ -526,8 +529,9 @@ def _make_handler(
                     encoding="utf-8",
                 )
                 logging.info(
-                    "Saved %d review entries to %s",
+                    "Saved %d review entries and %d failure modes to %s",
                     len(payload["entries"]),
+                    len(payload["failure_modes"]),
                     notes_path,
                 )
                 self._send_json({"ok": True, "saved_at": saved_at})

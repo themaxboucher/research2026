@@ -1185,7 +1185,7 @@
         border-color: var(--accent);
       }
       .gen-view .model-note-wrap {
-        padding: 0 12px 12px;
+        padding: 10px 12px 12px;
       }
       .gen-view .model-note-wrap .note-input {
         margin-top: 0;
@@ -1221,6 +1221,399 @@
       .gen-save.dirty::after {
         content: "•";
         margin-left: 6px;
+      }
+
+      /* ===== Failure-mode tags (per-model) ===== */
+      .gen-view .model-tags-wrap {
+        position: relative;
+        padding: 8px 12px 0;
+      }
+      .gen-view .tag-chips {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+      .gen-view .tag-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 4px 2px 9px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.4;
+      }
+      .gen-view .tag-chip .tag-x {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        background: rgba(0, 0, 0, 0.18);
+        color: inherit;
+        border-radius: 999px;
+        width: 15px;
+        height: 15px;
+        padding: 0;
+        cursor: pointer;
+        opacity: 0.75;
+      }
+      .gen-view .tag-chip .tag-x:hover {
+        opacity: 1;
+      }
+      .gen-view .tag-chip .tag-x .icon {
+        width: 11px;
+        height: 11px;
+      }
+      .gen-view .tag-add {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        padding: 2px 9px 2px 6px;
+        border-radius: 999px;
+        border: 1px dashed var(--border);
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .gen-view .tag-add:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      .gen-view .tag-add .icon {
+        width: 12px;
+        height: 12px;
+      }
+      /* Rendered at the document level (appended to <body>) and positioned in
+         JS, so the parent comment block's overflow:hidden can't clip it. */
+      .tag-dropdown {
+        position: fixed;
+        z-index: 90;
+        width: 240px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+        padding: 8px;
+      }
+      .tag-search {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--bg-subtle);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 9px;
+        font-size: 12.5px;
+      }
+      .tag-search:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .tag-options {
+        margin-top: 6px;
+        max-height: 200px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .tag-option {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: none;
+        color: var(--text);
+        border-radius: 5px;
+        padding: 6px 8px;
+        font-size: 12.5px;
+        cursor: pointer;
+      }
+      .tag-option:hover {
+        background: var(--bg-subtle);
+      }
+      .tag-option.create {
+        color: var(--text-muted);
+      }
+      .tag-option.create .icon {
+        width: 13px;
+        height: 13px;
+      }
+      .tag-swatch {
+        width: 11px;
+        height: 11px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+
+      /* ===== Failure-mode breakdown card ===== */
+      .gen-view .breakdown-card {
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        margin-bottom: 24px;
+        overflow: hidden;
+      }
+      .gen-view .breakdown-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 18px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .gen-view .breakdown-head:hover {
+        background: var(--bg);
+      }
+      .gen-view .breakdown-card.collapsed .breakdown-head {
+        border-bottom: none;
+      }
+      .gen-view .breakdown-title {
+        font-weight: 600;
+        color: var(--text);
+        font-size: 13px;
+      }
+      .gen-view .breakdown-sub {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+      .gen-view .breakdown-toggle {
+        color: var(--text-muted);
+        flex-shrink: 0;
+        transition: transform 0.15s ease;
+      }
+      .gen-view .breakdown-card.collapsed .breakdown-toggle {
+        transform: rotate(-90deg);
+      }
+      .gen-view .manage-tags {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-muted);
+        padding: 5px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .gen-view .manage-tags:hover {
+        color: var(--text);
+        border-color: var(--accent);
+      }
+      .gen-view .manage-tags .icon {
+        width: 13px;
+        height: 13px;
+      }
+      .gen-view .breakdown-card.collapsed .breakdown-body {
+        display: none;
+      }
+      .gen-view .breakdown-body {
+        padding: 4px 18px 18px;
+        overflow-x: auto;
+      }
+      .gen-view .breakdown-table {
+        border-collapse: collapse;
+        font-size: 12.5px;
+        min-width: 100%;
+      }
+      .gen-view .breakdown-table th,
+      .gen-view .breakdown-table td {
+        padding: 6px 12px;
+        text-align: center;
+        border-bottom: 1px solid var(--border-muted);
+        white-space: nowrap;
+      }
+      .gen-view .breakdown-table thead th {
+        color: var(--text-muted);
+        font-weight: 600;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 11.5px;
+      }
+      .gen-view .breakdown-table th.bd-row-label,
+      .gen-view .breakdown-table td.bd-row-label {
+        text-align: left;
+      }
+      .gen-view .breakdown-table td.bd-total,
+      .gen-view .breakdown-table th.bd-total {
+        font-weight: 700;
+        color: var(--text);
+        border-left: 1px solid var(--border);
+      }
+      .gen-view .breakdown-table tr:last-child td {
+        border-bottom: none;
+      }
+      .gen-view .breakdown-table tr.bd-special td {
+        color: var(--text-muted);
+      }
+      .gen-view .bd-count {
+        color: var(--text);
+      }
+      .gen-view .bd-count.zero {
+        color: var(--text-muted);
+        opacity: 0.4;
+      }
+      .gen-view .bd-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .gen-view .bd-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .gen-view .breakdown-empty {
+        color: var(--text-muted);
+        font-size: 12.5px;
+        padding: 6px 0;
+      }
+
+      /* ===== Tag manager modal ===== */
+      .tag-modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(1, 4, 9, 0.7);
+        z-index: 100;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 60px 20px;
+      }
+      .tag-modal {
+        background: var(--bg-subtle);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        width: 480px;
+        max-width: 100%;
+        max-height: 80vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .tag-modal-head {
+        display: flex;
+        align-items: center;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--border);
+      }
+      .tag-modal-head h2 {
+        margin: 0;
+        font-size: 15px;
+        color: var(--text);
+      }
+      .tag-modal-close {
+        margin-left: auto;
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        padding: 4px;
+      }
+      .tag-modal-close:hover {
+        color: var(--text);
+      }
+      .tag-modal-body {
+        padding: 12px 18px;
+        overflow-y: auto;
+      }
+      .tag-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 0;
+      }
+      .tag-row + .tag-row {
+        border-top: 1px solid var(--border-muted);
+      }
+      .tag-row input[type="color"] {
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: transparent;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .tag-row .tag-name {
+        flex: 1;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 10px;
+        font-size: 13px;
+      }
+      .tag-row .tag-name:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .tag-row .tag-uses {
+        font-size: 11px;
+        color: var(--text-muted);
+        white-space: nowrap;
+      }
+      .tag-row .tag-delete {
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        padding: 5px;
+      }
+      .tag-row .tag-delete:hover {
+        color: var(--chip-error-fg);
+        border-color: var(--chip-error-fg);
+      }
+      .tag-row .tag-delete .icon {
+        width: 14px;
+        height: 14px;
+      }
+      .tag-modal-empty {
+        color: var(--text-muted);
+        font-size: 13px;
+        padding: 8px 0 14px;
+      }
+      .tag-modal-foot {
+        display: flex;
+        gap: 8px;
+        padding: 12px 18px;
+        border-top: 1px solid var(--border);
+      }
+      .tag-modal-foot input {
+        flex: 1;
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 10px;
+        font-size: 13px;
+      }
+      .tag-modal-foot input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .tag-modal-foot button {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 7px 14px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .tag-modal-foot button:hover {
+        filter: brightness(1.08);
       }
     </style>
   </head>
@@ -1277,10 +1670,29 @@
 
     <div class="gen-view" id="gen-view" style="display: none">
       <div class="gen-progress" id="gen-progress" aria-hidden="true"></div>
+      <div class="gen-inner" id="gen-breakdown" style="padding-bottom: 0"></div>
       <div class="gen-inner" id="gen-root"></div>
       <footer class="gen-footer">
         <span id="gen-count"></span> · built from <span id="gen-source"></span>
       </footer>
+    </div>
+
+    <div class="tag-modal-overlay" id="tag-modal-overlay">
+      <div class="tag-modal" role="dialog" aria-label="Manage failure-mode tags">
+        <div class="tag-modal-head">
+          <h2>Failure-mode tags</h2>
+          <button type="button" class="tag-modal-close" id="tag-modal-close"></button>
+        </div>
+        <div class="tag-modal-body" id="tag-modal-body"></div>
+        <div class="tag-modal-foot">
+          <input
+            type="text"
+            id="tag-modal-new"
+            placeholder="New failure-mode name…"
+          />
+          <button type="button" id="tag-modal-add">Add</button>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -1306,6 +1718,11 @@
         "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
         copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
         check: '<polyline points="20 6 9 17 4 12"/>',
+        x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+        plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+        tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
+        "trash-2":
+          '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
       };
 
       function iconSvg(name, extraClass = "") {
@@ -2119,10 +2536,20 @@
         data: null,
         query: "",
         notes: {},
+        failureModes: [],
+        expanded: new Set(),
+        breakdownCollapsed: false,
         dirty: false,
         cardByKey: {},
         blockByKey: {},
       };
+
+      // Palette cycled through when auto-coloring newly created tags.
+      const TAG_PALETTE = [
+        "#e57373", "#64b5f6", "#81c784", "#ffb74d", "#ba68c8",
+        "#4db6ac", "#f06292", "#a1887f", "#90a4ae", "#dce775",
+        "#7986cb", "#4fc3f7", "#aed581", "#ff8a65", "#9575cd",
+      ];
 
       function setView(view) {
         const isGen = view === "gen";
@@ -2146,11 +2573,98 @@
           fetch("/notes"),
         ]);
         gen.data = await genResponse.json();
-        gen.notes = (await notesResponse.json()).entries || {};
+        const notesData = await notesResponse.json();
+        gen.notes = notesData.entries || {};
+        gen.failureModes = notesData.failure_modes || [];
         gen.dirty = false;
         renderGenerations();
         updateSaveButton();
         updateReviewCount();
+      }
+
+      // --- Failure-mode tag catalog -------------------------------------
+      // A shared vocabulary of tags {id, name, color}. Generations reference
+      // tags by stable id (in entry.model_tags[model]) so a global rename or
+      // recolor only touches the catalog, never the per-generation entries.
+      function findTag(id) {
+        return gen.failureModes.find((tag) => tag.id === id) || null;
+      }
+
+      function nextTagId() {
+        let max = 0;
+        for (const tag of gen.failureModes) {
+          const match = /^fm(\d+)$/.exec(tag.id);
+          if (match) max = Math.max(max, Number(match[1]));
+        }
+        return "fm" + (max + 1);
+      }
+
+      function createTag(name) {
+        const tag = {
+          id: nextTagId(),
+          name: name.trim(),
+          color: TAG_PALETTE[gen.failureModes.length % TAG_PALETTE.length],
+        };
+        gen.failureModes.push(tag);
+        markDirty();
+        return tag;
+      }
+
+      function deleteTag(id) {
+        gen.failureModes = gen.failureModes.filter((tag) => tag.id !== id);
+        for (const entry of Object.values(gen.notes)) {
+          if (!entry.model_tags) continue;
+          for (const model of Object.keys(entry.model_tags)) {
+            entry.model_tags[model] = entry.model_tags[model].filter(
+              (tagId) => tagId !== id,
+            );
+            if (!entry.model_tags[model].length) delete entry.model_tags[model];
+          }
+        }
+        markDirty();
+      }
+
+      // Count how many generations currently carry a tag (for the manager).
+      function tagUsageCount(id) {
+        let count = 0;
+        for (const entry of Object.values(gen.notes)) {
+          for (const ids of Object.values(entry.model_tags || {})) {
+            if (ids.includes(id)) count += 1;
+          }
+        }
+        return count;
+      }
+
+      function appliedTagIds(key, model) {
+        const entry = gen.notes[key];
+        return (entry && entry.model_tags && entry.model_tags[model]) || [];
+      }
+
+      function addTagToModel(key, model, id) {
+        const entry = noteEntry(key);
+        if (!entry.model_tags[model]) entry.model_tags[model] = [];
+        if (!entry.model_tags[model].includes(id)) {
+          entry.model_tags[model].push(id);
+        }
+        markDirty();
+      }
+
+      function removeTagFromModel(key, model, id) {
+        const entry = noteEntry(key);
+        const ids = entry.model_tags[model] || [];
+        entry.model_tags[model] = ids.filter((tagId) => tagId !== id);
+        if (!entry.model_tags[model].length) delete entry.model_tags[model];
+        markDirty();
+      }
+
+      // Readable text color for a chip given its background luminance.
+      function tagTextColor(hex) {
+        const value = hex.replace("#", "");
+        const r = parseInt(value.substr(0, 2), 16);
+        const g = parseInt(value.substr(2, 2), 16);
+        const b = parseInt(value.substr(4, 2), 16);
+        const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        return lum > 0.6 ? "#1c2128" : "#ffffff";
       }
 
       // Notes/review state is keyed by target.key. Read with a safe default at
@@ -2158,10 +2672,11 @@
       function noteEntry(key) {
         let entry = gen.notes[key];
         if (!entry) {
-          entry = { reviewed: false, note: "", model_notes: {} };
+          entry = { reviewed: false, note: "", model_notes: {}, model_tags: {} };
           gen.notes[key] = entry;
         }
         if (!entry.model_notes) entry.model_notes = {};
+        if (!entry.model_tags) entry.model_tags = {};
         return entry;
       }
 
@@ -2190,21 +2705,31 @@
 
       async function saveNotes() {
         if (!gen.loaded) return;
+        // Only keep tags that still exist in the catalog, so a deleted tag
+        // never lingers in a saved entry.
+        const liveIds = new Set(gen.failureModes.map((tag) => tag.id));
         const entries = {};
         for (const [key, entry] of Object.entries(gen.notes)) {
           const modelNotes = {};
           for (const [model, text] of Object.entries(entry.model_notes || {})) {
             if (text && text.trim()) modelNotes[model] = text;
           }
+          const modelTags = {};
+          for (const [model, ids] of Object.entries(entry.model_tags || {})) {
+            const clean = (ids || []).filter((id) => liveIds.has(id));
+            if (clean.length) modelTags[model] = clean;
+          }
           const hasContent =
             entry.reviewed ||
             (entry.note && entry.note.trim()) ||
-            Object.keys(modelNotes).length > 0;
+            Object.keys(modelNotes).length > 0 ||
+            Object.keys(modelTags).length > 0;
           if (!hasContent) continue;
           entries[key] = {
             reviewed: !!entry.reviewed,
             note: entry.note || "",
             model_notes: modelNotes,
+            model_tags: modelTags,
           };
         }
         const button = document.getElementById("gen-save");
@@ -2213,7 +2738,10 @@
           const response = await fetch("/notes", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ entries }),
+            body: JSON.stringify({
+              failure_modes: gen.failureModes,
+              entries,
+            }),
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           gen.dirty = false;
@@ -2319,10 +2847,15 @@
           reviewed: false,
           note: "",
           model_notes: {},
+          model_tags: {},
         };
 
+        const collapsed = !gen.expanded.has(key);
         const card = document.createElement("section");
-        card.className = "target-card collapsed" + (entry.reviewed ? " reviewed" : "");
+        card.className =
+          "target-card" +
+          (collapsed ? " collapsed" : "") +
+          (entry.reviewed ? " reviewed" : "");
         card.dataset.key = key;
         gen.cardByKey[key] = card;
 
@@ -2362,7 +2895,9 @@
         header.addEventListener("click", (event) => {
           // Let the repo link work without toggling the card.
           if (event.target.closest("a")) return;
-          card.classList.toggle("collapsed");
+          const nowCollapsed = card.classList.toggle("collapsed");
+          if (nowCollapsed) gen.expanded.delete(key);
+          else gen.expanded.add(key);
         });
 
         const actions = document.createElement("div");
@@ -2439,6 +2974,7 @@
         for (const result of target.results || []) {
           const model = result.model || "(model)";
           const block = genCommentBlock("model", model, result.comment, result.error);
+          block.appendChild(buildModelTags(key, model));
           block.appendChild(buildModelNote(key, model, entry));
           grid.appendChild(block);
         }
@@ -2479,6 +3015,181 @@
           markDirty();
         });
         wrap.appendChild(textarea);
+        return wrap;
+      }
+
+      // Failure-mode tags for one model's generation: colored, removable chips
+      // plus a "+" combobox that filters the shared vocabulary and offers to
+      // create a new tag from whatever you've typed.
+      function buildModelTags(key, model) {
+        const wrap = document.createElement("div");
+        wrap.className = "model-tags-wrap";
+        const chips = document.createElement("div");
+        chips.className = "tag-chips";
+        wrap.appendChild(chips);
+
+        const addBtn = document.createElement("button");
+        addBtn.type = "button";
+        addBtn.className = "tag-add";
+        addBtn.innerHTML = iconSvg("plus") + "<span>tag</span>";
+        chips.appendChild(addBtn);
+
+        // Lives in <body> (appended on open) so no ancestor's overflow can
+        // clip it; positioned under the add button in JS.
+        const dropdown = document.createElement("div");
+        dropdown.className = "tag-dropdown";
+        dropdown.style.display = "none";
+
+        function renderChips() {
+          for (const el of chips.querySelectorAll(".tag-chip")) el.remove();
+          for (const id of appliedTagIds(key, model)) {
+            const tag = findTag(id);
+            if (!tag) continue;
+            const chip = document.createElement("span");
+            chip.className = "tag-chip";
+            chip.style.background = tag.color;
+            chip.style.color = tagTextColor(tag.color);
+            chip.appendChild(document.createTextNode(tag.name));
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "tag-x";
+            remove.innerHTML = iconSvg("x");
+            remove.title = "Remove tag";
+            remove.addEventListener("click", (event) => {
+              event.stopPropagation();
+              removeTagFromModel(key, model, id);
+              renderChips();
+              renderBreakdown();
+            });
+            chip.appendChild(remove);
+            chips.insertBefore(chip, addBtn);
+          }
+        }
+
+        function positionDropdown() {
+          const rect = addBtn.getBoundingClientRect();
+          dropdown.style.top = rect.bottom + 4 + "px";
+          // Keep the 240px-wide panel within the viewport horizontally.
+          const left = Math.min(rect.left, window.innerWidth - 240 - 8);
+          dropdown.style.left = Math.max(8, left) + "px";
+        }
+
+        function closeDropdown() {
+          dropdown.style.display = "none";
+          dropdown.innerHTML = "";
+          if (dropdown.parentNode) dropdown.parentNode.removeChild(dropdown);
+          if (dropdown._onOutside) {
+            document.removeEventListener("click", dropdown._onOutside);
+            dropdown._onOutside = null;
+          }
+          if (dropdown._reposition) {
+            window.removeEventListener("resize", dropdown._reposition);
+            document
+              .getElementById("gen-view")
+              .removeEventListener("scroll", dropdown._reposition);
+            dropdown._reposition = null;
+          }
+          if (gen.closeTagDropdown === closeDropdown) gen.closeTagDropdown = null;
+        }
+
+        function openDropdown() {
+          dropdown.innerHTML = "";
+          document.body.appendChild(dropdown);
+          const input = document.createElement("input");
+          input.className = "tag-search";
+          input.placeholder = "Search or create…";
+          const list = document.createElement("div");
+          list.className = "tag-options";
+          dropdown.append(input, list);
+          dropdown.style.display = "block";
+          positionDropdown();
+          gen.closeTagDropdown = closeDropdown;
+          input.focus();
+
+          function apply(id) {
+            addTagToModel(key, model, id);
+            closeDropdown();
+            renderChips();
+            renderBreakdown();
+          }
+
+          function refresh() {
+            const query = input.value.trim().toLowerCase();
+            list.innerHTML = "";
+            const applied = new Set(appliedTagIds(key, model));
+            const matches = gen.failureModes.filter(
+              (tag) =>
+                !applied.has(tag.id) && tag.name.toLowerCase().includes(query),
+            );
+            for (const tag of matches) {
+              const option = document.createElement("button");
+              option.type = "button";
+              option.className = "tag-option";
+              option.innerHTML =
+                `<span class="tag-swatch" style="background:${escapeHTML(tag.color)}"></span>` +
+                escapeHTML(tag.name);
+              option.addEventListener("click", () => apply(tag.id));
+              list.appendChild(option);
+            }
+            const exact = gen.failureModes.some(
+              (tag) => tag.name.toLowerCase() === query,
+            );
+            if (query && !exact) {
+              const create = document.createElement("button");
+              create.type = "button";
+              create.className = "tag-option create";
+              create.innerHTML =
+                iconSvg("plus") + ` Create “${escapeHTML(input.value.trim())}”`;
+              create.addEventListener("click", () => {
+                const tag = createTag(input.value.trim());
+                apply(tag.id);
+              });
+              list.appendChild(create);
+            }
+          }
+
+          input.addEventListener("input", refresh);
+          input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              const first = list.querySelector(".tag-option");
+              if (first) first.click();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              closeDropdown();
+            }
+          });
+          refresh();
+
+          // Reposition while the generations list scrolls or the window
+          // resizes, so the panel tracks its add button.
+          dropdown._reposition = positionDropdown;
+          window.addEventListener("resize", dropdown._reposition);
+          document
+            .getElementById("gen-view")
+            .addEventListener("scroll", dropdown._reposition);
+
+          // Defer the outside-click listener so the click that opened the
+          // dropdown doesn't immediately close it. The panel now lives outside
+          // `wrap`, so treat clicks inside either as "inside".
+          dropdown._onOutside = (event) => {
+            if (!wrap.contains(event.target) && !dropdown.contains(event.target)) {
+              closeDropdown();
+            }
+          };
+          setTimeout(
+            () => document.addEventListener("click", dropdown._onOutside),
+            0,
+          );
+        }
+
+        addBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (dropdown.style.display === "none") openDropdown();
+          else closeDropdown();
+        });
+
+        renderChips();
         return wrap;
       }
 
@@ -2529,6 +3240,7 @@
 
       function renderGenerations() {
         if (!gen.data) return;
+        if (gen.closeTagDropdown) gen.closeTagDropdown();
         const root = document.getElementById("gen-root");
         root.innerHTML = "";
         gen.cardByKey = {};
@@ -2564,6 +3276,229 @@
           `${repoCount} repo${repoCount === 1 ? "" : "s"} · ${modelLabel}`;
         document.getElementById("gen-source").textContent =
           gen.data.source + " · generated " + gen.data.generated_at;
+        renderBreakdown();
+      }
+
+      // The breakdown card: a failure-mode × model matrix of counts computed
+      // over the full dataset (it deliberately ignores the search filter, so
+      // totals stay stable while you slice generations below). Errored
+      // generations and untagged-but-produced ones get their own rows.
+      function renderBreakdown() {
+        const root = document.getElementById("gen-breakdown");
+        root.innerHTML = "";
+        if (!gen.data || !gen.data.targets.length) return;
+        const models = gen.data.models;
+
+        const tagCounts = {};
+        for (const tag of gen.failureModes) {
+          tagCounts[tag.id] = {};
+          for (const model of models) tagCounts[tag.id][model] = 0;
+        }
+        const untagged = {};
+        const errored = {};
+        for (const model of models) {
+          untagged[model] = 0;
+          errored[model] = 0;
+        }
+
+        for (const target of gen.data.targets) {
+          for (const result of target.results || []) {
+            const model = result.model;
+            if (!(model in untagged)) continue;
+            if (result.error) {
+              errored[model] += 1;
+              continue;
+            }
+            const ids = appliedTagIds(target.key, model);
+            if (!ids.length) {
+              untagged[model] += 1;
+              continue;
+            }
+            for (const id of ids) {
+              if (tagCounts[id]) tagCounts[id][model] += 1;
+            }
+          }
+        }
+
+        const rowTotal = (row) =>
+          models.reduce((sum, model) => sum + row[model], 0);
+        const tagRows = gen.failureModes
+          .map((tag) => ({ tag, row: tagCounts[tag.id] }))
+          .sort((a, b) => rowTotal(b.row) - rowTotal(a.row));
+
+        const card = document.createElement("section");
+        card.className =
+          "breakdown-card" + (gen.breakdownCollapsed ? " collapsed" : "");
+
+        const head = document.createElement("div");
+        head.className = "breakdown-head";
+        head.innerHTML = `
+          ${iconSvg("chevron-down", "breakdown-toggle")}
+          <span class="breakdown-title">Failure modes</span>
+          <span class="breakdown-sub">${gen.failureModes.length} tag${
+            gen.failureModes.length === 1 ? "" : "s"
+          } · ${models.length} model${models.length === 1 ? "" : "s"}</span>
+        `;
+        const manage = document.createElement("button");
+        manage.type = "button";
+        manage.className = "manage-tags";
+        manage.innerHTML = iconSvg("tag") + "<span>Manage tags</span>";
+        manage.addEventListener("click", (event) => {
+          event.stopPropagation();
+          openTagManager();
+        });
+        head.appendChild(manage);
+        head.addEventListener("click", () => {
+          gen.breakdownCollapsed = !gen.breakdownCollapsed;
+          card.classList.toggle("collapsed", gen.breakdownCollapsed);
+        });
+        card.appendChild(head);
+
+        const body = document.createElement("div");
+        body.className = "breakdown-body";
+        card.appendChild(body);
+
+        const cell = (count) =>
+          `<td class="bd-count${count === 0 ? " zero" : ""}">${count}</td>`;
+        const specialRow = (label, row, extraClass) => {
+          const total = rowTotal(row);
+          return (
+            `<tr class="bd-special ${extraClass}">` +
+            `<td class="bd-row-label">${label}</td>` +
+            models.map((model) => cell(row[model])).join("") +
+            `<td class="bd-total">${total}</td></tr>`
+          );
+        };
+
+        let rowsHtml = "";
+        for (const { tag, row } of tagRows) {
+          rowsHtml +=
+            `<tr><td class="bd-row-label"><span class="bd-label">` +
+            `<span class="bd-dot" style="background:${escapeHTML(tag.color)}"></span>` +
+            `${escapeHTML(tag.name)}</span></td>` +
+            models.map((model) => cell(row[model])).join("") +
+            `<td class="bd-total">${rowTotal(row)}</td></tr>`;
+        }
+        rowsHtml += specialRow("(untagged)", untagged, "bd-untagged");
+        rowsHtml += specialRow("(error)", errored, "bd-error");
+
+        if (!gen.failureModes.length) {
+          const hint = document.createElement("div");
+          hint.className = "breakdown-empty";
+          hint.textContent =
+            "No failure modes yet — add tags under a model's generation, or use “Manage tags”.";
+          body.appendChild(hint);
+        }
+
+        const table = document.createElement("table");
+        table.className = "breakdown-table";
+        table.innerHTML =
+          `<thead><tr><th class="bd-row-label">Failure mode</th>` +
+          models
+            .map((model) => `<th>${escapeHTML(model)}</th>`)
+            .join("") +
+          `<th class="bd-total">Total</th></tr></thead><tbody>${rowsHtml}</tbody>`;
+        body.appendChild(table);
+
+        root.appendChild(card);
+      }
+
+      // --- Tag manager modal --------------------------------------------
+      // Global rename / recolor / delete for the shared tag vocabulary. Edits
+      // rebuild the cards and breakdown so chips reflect the change everywhere.
+      function reRenderAll() {
+        renderGenerations();
+      }
+
+      function openTagManager() {
+        document.getElementById("tag-modal-overlay").style.display = "flex";
+        renderTagManager();
+      }
+
+      function closeTagManager() {
+        document.getElementById("tag-modal-overlay").style.display = "none";
+      }
+
+      function renderTagManager() {
+        const body = document.getElementById("tag-modal-body");
+        body.innerHTML = "";
+        if (!gen.failureModes.length) {
+          const empty = document.createElement("div");
+          empty.className = "tag-modal-empty";
+          empty.textContent =
+            "No failure-mode tags yet. Add one below or create them inline while reviewing.";
+          body.appendChild(empty);
+          return;
+        }
+        for (const tag of gen.failureModes) {
+          const row = document.createElement("div");
+          row.className = "tag-row";
+
+          const color = document.createElement("input");
+          color.type = "color";
+          color.value = tag.color;
+          color.title = "Change color";
+          color.addEventListener("input", () => {
+            tag.color = color.value;
+            markDirty();
+            renderBreakdown();
+          });
+          color.addEventListener("change", reRenderAll);
+
+          const name = document.createElement("input");
+          name.type = "text";
+          name.className = "tag-name";
+          name.value = tag.name;
+          name.addEventListener("input", () => {
+            tag.name = name.value;
+            markDirty();
+          });
+          name.addEventListener("change", reRenderAll);
+
+          const uses = document.createElement("span");
+          uses.className = "tag-uses";
+          const count = tagUsageCount(tag.id);
+          uses.textContent = `${count} use${count === 1 ? "" : "s"}`;
+
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "tag-delete";
+          remove.title = "Delete tag";
+          remove.innerHTML = iconSvg("trash-2");
+          remove.addEventListener("click", () => {
+            const used = tagUsageCount(tag.id);
+            const warning = used
+              ? `Delete “${tag.name}”? It will be removed from ${used} generation${
+                  used === 1 ? "" : "s"
+                }.`
+              : `Delete “${tag.name}”?`;
+            if (!confirm(warning)) return;
+            deleteTag(tag.id);
+            renderTagManager();
+            reRenderAll();
+          });
+
+          row.append(color, name, uses, remove);
+          body.appendChild(row);
+        }
+      }
+
+      function addTagFromManager() {
+        const input = document.getElementById("tag-modal-new");
+        const name = input.value.trim();
+        if (!name) return;
+        if (
+          gen.failureModes.some(
+            (tag) => tag.name.toLowerCase() === name.toLowerCase(),
+          )
+        ) {
+          input.value = "";
+          return;
+        }
+        createTag(name);
+        input.value = "";
+        renderTagManager();
+        reRenderAll();
       }
 
       // Build the right-edge reading-position rail: one block per card, each a
@@ -2648,12 +3583,39 @@
         genSearchTimer = setTimeout(renderGenerations, 150);
       });
 
+      // Tag manager modal wiring.
+      document
+        .getElementById("tag-modal-close")
+        .addEventListener("click", closeTagManager);
+      document
+        .getElementById("tag-modal-overlay")
+        .addEventListener("click", (event) => {
+          if (event.target.id === "tag-modal-overlay") closeTagManager();
+        });
+      document
+        .getElementById("tag-modal-add")
+        .addEventListener("click", addTagFromManager);
+      document
+        .getElementById("tag-modal-new")
+        .addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            addTagFromManager();
+          }
+        });
+
       // One Save button for all notes + review state; Cmd/Ctrl+S does the same.
       document.getElementById("gen-save").addEventListener("click", saveNotes);
       window.addEventListener("keydown", (event) => {
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
           event.preventDefault();
           saveNotes();
+        }
+        if (
+          event.key === "Escape" &&
+          document.getElementById("tag-modal-overlay").style.display === "flex"
+        ) {
+          closeTagManager();
         }
       });
       window.addEventListener("beforeunload", (event) => {
