@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from llms import openrouter, transformers
 from storage import append_to_jsonl, iter_from_jsonl, save_to_jsonl
-from comments import extract_comments
+from comments import extract_comments, is_machine_directive_comment
 
 
 SOURCE_FILENAME = "repo_files_sample"
@@ -505,6 +505,8 @@ def _target_comments(source_file: dict) -> list[dict]:
         for comment in (source_file.get("comments") or [])
         if comment.get("type") in TARGET_COMMENT_TYPES
         and comment.get("status") in TARGET_COMMENT_STATUSES
+        and comment.get("comment") is not None
+        and not is_machine_directive_comment(comment["comment"])
     ]
 
 
