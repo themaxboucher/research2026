@@ -6,9 +6,9 @@ STATUS_TEMPLATE_PATHS = {
 }
 
 INTENT_INSTRUCTION_PATHS = {
-    "summary": Path(__file__).parent / "prompts" / "summary.md",
-    "expand": Path(__file__).parent / "prompts" / "expand.md",
-    "rationale": Path(__file__).parent / "prompts" / "rationale.md",
+    "what": Path(__file__).parent / "prompts" / "what.md",
+    "how": Path(__file__).parent / "prompts" / "how.md",
+    "why": Path(__file__).parent / "prompts" / "why.md",
 }
 
 
@@ -77,7 +77,7 @@ def _build_add_prompt(
     repo_name: str, filepath: str, comment_data: dict, scope_code: str
 ) -> str:
     template = STATUS_TEMPLATE_PATHS["added"].read_text(encoding="utf-8")
-    INTENT = "rationale"
+    INTENT = "why"
     return (
         template.replace("{repo_name}", repo_name)
         .replace("{filepath}", filepath)
