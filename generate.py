@@ -2,6 +2,7 @@ import ast
 import logging
 import os
 import re
+import textwrap
 from pathlib import Path
 from typing import Callable, NamedTuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -303,10 +304,31 @@ def _reverted_comment_text(target: dict, old_comments: list[dict]) -> str | None
     return None
 
 
+_MAX_COMMENT_LINE_LENGTH = 80
+
+
+def _wrap_comment_line(line: str) -> list[str]:
+    if len(line) <= _MAX_COMMENT_LINE_LENGTH:
+        return [line]
+    hash_count = len(line) - len(line.lstrip("#"))
+    prefix = line[:hash_count] + " "
+    content = line[hash_count:].strip()
+    wrapped = textwrap.wrap(
+        content,
+        width=_MAX_COMMENT_LINE_LENGTH,
+        initial_indent=prefix,
+        subsequent_indent=prefix,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return wrapped or [line]
+
+
 def _normalize_block_comment(text: str) -> list[str]:
     lines = [line.strip() for line in text.strip().splitlines()]
     lines = [line for line in lines if line.startswith("#")]
-    return lines or ["# " + text.strip().lstrip("#").strip()]
+    lines = lines or ["# " + text.strip().lstrip("#").strip()]
+    return [wrapped for line in lines for wrapped in _wrap_comment_line(line)]
 
 
 def _normalize_inline_comment(text: str) -> str:
