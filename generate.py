@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from llms import openrouter, transformers
 from storage import append_to_jsonl, iter_from_jsonl, save_to_jsonl
 from comments import extract_comments, is_machine_directive_comment
+from prompt import build_prompt
+import generations
 
 
 SOURCE_FILENAME = "repo_files_sample"
@@ -27,7 +29,7 @@ MODEL_PROFILES = {
             "meta-llama/llama-3.1-8b-instruct",
             "qwen/qwen-2.5-7b-instruct",
             "deepseek/deepseek-v4-pro",
-            "z-ai/glm-5.2"
+            "z-ai/glm-5.2",
         ],
         get_completion=openrouter.get_completion,
     ),
@@ -40,9 +42,6 @@ MODEL_PROFILES = {
     ),
 }
 DEFAULT_MODEL_PROFILE = "local"
-
-PROMPT_PATH = Path(__file__).parent / "prompts" / "comment_local.md"
-PROMPT_NAME = PROMPT_PATH.name
 
 
 def get_model_profile() -> ModelProfile:
@@ -138,9 +137,7 @@ def _diff_region_bounds(
     return top, bottom
 
 
-_HUNK_HEADER_PATTERN = re.compile(
-    r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@"
-)
+_HUNK_HEADER_PATTERN = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 def _iter_hunks(diff: str):
@@ -153,7 +150,7 @@ def _iter_hunks(diff: str):
             # Anything after the closing `@@` is the function-context hint
             # git adds (e.g. " def foo():"). Keep it so the LLM gets the same
             # signal git would have shown.
-            header_suffix = line[match.end():].rstrip("\n")
+            header_suffix = line[match.end() :].rstrip("\n")
             current = {
                 "old_start": int(match.group(1)),
                 "old_count": int(match.group(2)) if match.group(2) else 1,
@@ -216,10 +213,13 @@ def _stripped_hunk_body(hunk: dict, comment_data: dict) -> list[str]:
                 # A naive split can only over-report a change (a `#` in a string),
                 # which is safe: it shows a `-`/`+` pair rather than hiding a change.
                 old_code = (
-                    None if paired_dash is None
+                    None
+                    if paired_dash is None
                     else paired_dash[1:].split("#", 1)[0].rstrip()
                 )
-                code_is_unchanged = old_code is not None and old_code == (code or "").rstrip()
+                code_is_unchanged = (
+                    old_code is not None and old_code == (code or "").rstrip()
+                )
                 if code is None or code_is_unchanged:
                     # Nothing left to show, or the comment was the only change:
                     # fold back to a single context line where one existed.
@@ -283,7 +283,9 @@ def _scope_diff(diff: str, source_code: str, comment_data: dict) -> str | None:
     for line_no in range(new_cursor, region_end + 1):
         body.append(" " + source_lines[line_no - 1] + "\n")
 
-    old_start = overlapping[0]["old_start"] - (overlapping[0]["new_start"] - region_start)
+    old_start = overlapping[0]["old_start"] - (
+        overlapping[0]["new_start"] - region_start
+    )
     old_count = sum(1 for line in body if line and line[0] in " -")
     new_count = sum(1 for line in body if line and line[0] in " +")
     header = (
@@ -291,6 +293,47 @@ def _scope_diff(diff: str, source_code: str, comment_data: dict) -> str | None:
         f"{overlapping[0].get('header_suffix', '')}\n"
     )
     return header + "".join(body)
+
+
+def _scope_code(source_code: str, comment_data: dict) -> str:
+    """Return the source of the local scope (function, method, or class)
+    enclosing the target comment, with the target comment itself removed. A
+    block target is dropped entirely; an inline target keeps its code and loses
+    only the trailing comment. When the comment lives at module level, fall back
+    to the whole module, capped at MAX_LINE_COUNT lines."""
+    MAX_LINE_COUNT = 500
+    source_lines = source_code.splitlines()
+
+    qualified_name = _enclosing_scope_name(source_code, comment_data["start_line"])
+    scope_bounds = (
+        _local_scope_bounds(source_lines, source_code, qualified_name)
+        if qualified_name is not None
+        else None
+    )
+    if scope_bounds is not None:
+        start, end = scope_bounds
+    else:
+        start, end = 1, min(len(source_lines), MAX_LINE_COUNT)
+
+    target_start = comment_data["start_line"]
+    target_end = comment_data["end_line"]
+
+    output_lines: list[str] = []
+    for line_no in range(start, end + 1):
+        line = source_lines[line_no - 1]
+        line_is_target = target_start <= line_no <= target_end
+        if not line_is_target:
+            output_lines.append(line)
+            continue
+        if comment_data["type"] == "inline":
+            # Keep the code the inline comment sat on, dropping the comment.
+            anchor = comment_data.get("anchor")
+            code = anchor if anchor is not None else line.split("#", 1)[0].rstrip()
+            if code:
+                output_lines.append(code)
+        # A block target is wholly comment, so its lines vanish entirely.
+
+    return "\n".join(output_lines)
 
 
 def _reverted_comment_text(target: dict, old_comments: list[dict]) -> str | None:
@@ -374,50 +417,6 @@ def _apply_new_comment(
     return "\n".join(source_code_lines)
 
 
-def _location_instruction(comment_data: dict, unmodified_comment: str | None) -> str:
-    anchor = comment_data.get("anchor") or "(the anchored code)"
-    is_comment_edit = comment_data["status"] == "modified"
-    is_inline_comment = comment_data["type"] == "inline"
-
-    if is_inline_comment and is_comment_edit:
-        return (
-            "Update the inline comment on this line of code:\n"
-            f"```python\n{anchor}\n```\n"
-            f"Current (outdated) comment:\n```python\n{unmodified_comment}\n```"
-        )
-
-    if is_inline_comment:
-        return f"Write a new inline comment for this line of code:\n```python\n{anchor}\n```"
-
-    if is_comment_edit:
-        return (
-            "Update the block comment directly above this line of code:\n"
-            f"```python\n{anchor}\n```\n"
-            "Current (outdated) comment:\n"
-            f"```python\n{unmodified_comment}\n```"
-        )
-
-    return f"Write a new block comment directly above this line of code:\n```python\n{anchor}\n```"
-
-
-def _build_prompt(
-    filepath: str,
-    comment_data: dict,
-    diff_hunk: str,
-    unmodified_comment: str | None,
-) -> str:
-    template = PROMPT_PATH.read_text(encoding="utf-8")
-    return (
-        template.replace("{file_path}", filepath)
-        .replace("{comment_type}", comment_data["type"])
-        .replace("{diff_hunk}", diff_hunk)
-        .replace(
-            "{location_instruction}",
-            _location_instruction(comment_data, unmodified_comment),
-        )
-    )
-
-
 _CODE_FENCE_PATTERN = re.compile(r"\A```[^\n]*\n(?P<body>.*?)\n?```\Z", re.DOTALL)
 _XML_WRAPPER_PATTERN = re.compile(
     r"\A<(?P<tag>[A-Za-z][\w-]*)(?:\s[^>]*)?>(?P<body>.*)</(?P=tag)>\Z", re.DOTALL
@@ -466,7 +465,6 @@ def _generate_comment_with_model(
         )
         return {
             "model": model_name,
-            "prompt": prompt,
             "raw_response": raw_response,
             "comment_text": None,
             "new_source_code": None,
@@ -474,7 +472,6 @@ def _generate_comment_with_model(
         }
     return {
         "model": model_name,
-        "prompt": prompt,
         "raw_response": raw_response,
         "comment_text": comment_text,
         "new_source_code": new_source_code,
@@ -516,16 +513,30 @@ def _comment_generation(
     previous_source_code = file_data["previous_source_code"]
     filepath = file_data["new_path"]
 
-    unmodified_comment = None
     if comment_data["status"] == "modified":
         previous_comments = extract_comments(
             previous_source_code, include_docstrings=False
         )
         unmodified_comment = _reverted_comment_text(comment_data, previous_comments)
+        diff_hunk = _scope_diff(diff, source_code, comment_data)
+        prompt = build_prompt(
+            file_data["repo_name"],
+            filepath,
+            comment_data,
+            status="modified",
+            diff_hunk=diff_hunk,
+            unmodified_comment=unmodified_comment,
+        )
 
-    diff_hunk = _scope_diff(diff, source_code, comment_data)
-
-    prompt = _build_prompt(filepath, comment_data, diff_hunk, unmodified_comment)
+    if comment_data["status"] == "added":
+        scope_code = _scope_code(source_code, comment_data)
+        prompt = build_prompt(
+            file_data["repo_name"],
+            filepath,
+            comment_data,
+            status="added",
+            scope_code=scope_code,
+        )
 
     results = _run_models_concurrently(
         prompt, filepath, source_code, comment_data, model_profile
@@ -537,8 +548,7 @@ def _comment_generation(
         "end_line": comment_data["end_line"],
         "anchor": comment_data.get("anchor"),
         "comment": comment_data.get("comment"),
-        "unmodified_comment": unmodified_comment,
-        "diff_hunk": diff_hunk,
+        "prompt": prompt,
         "results": results,
     }
 
@@ -595,12 +605,38 @@ def _is_eligible_file(source_file: dict) -> bool:
     return True
 
 
-def generate_comments_for_dataset(run_dir: Path, limit: int | None = None) -> None:
+def generate_comments_for_dataset(
+    run_dir: Path, label: str | None = None, limit: int | None = None
+) -> Path:
+    """Generate comments for the run's source dataset into a named generation
+    subdirectory. Each generation is written independently, so re-running never
+    touches a sibling generation. Re-running an existing label overwrites its
+    output but leaves its review notes in place (notes are keyed by target).
+    Returns the generation directory."""
     files_data = iter_from_jsonl(run_dir, SOURCE_FILENAME)
 
     model_profile = get_model_profile()
+    model_profile_name = os.environ.get("MODEL_PROFILE", DEFAULT_MODEL_PROFILE)
 
-    save_to_jsonl([], run_dir, GENERATED_DATASET_FILENAME)  # Clears the output file
+    label = label or generations.default_label()
+    gen_dir = generations.generation_dir(run_dir, label)
+    if (gen_dir / f"{GENERATED_DATASET_FILENAME}.jsonl").exists():
+        logging.warning(
+            "Generation %r already exists at %s; overwriting its output "
+            "(review notes are preserved).",
+            label,
+            gen_dir,
+        )
+
+    generations.write_manifest(
+        gen_dir,
+        label=label,
+        model_profile=model_profile_name,
+        model_names=model_profile.model_names,
+        config={"max_generate": limit},
+    )
+
+    save_to_jsonl([], gen_dir, GENERATED_DATASET_FILENAME)
 
     files_processed = 0
 
@@ -621,4 +657,6 @@ def generate_comments_for_dataset(run_dir: Path, limit: int | None = None) -> No
         generate_comments_for_file(file_data, model_profile)
         files_processed += 1
 
-        append_to_jsonl([file_data], run_dir, GENERATED_DATASET_FILENAME)
+        append_to_jsonl([file_data], gen_dir, GENERATED_DATASET_FILENAME)
+
+    return gen_dir

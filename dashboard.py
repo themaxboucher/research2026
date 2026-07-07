@@ -1,4 +1,5 @@
 import argparse
+import copy
 import difflib
 import json
 import logging
@@ -12,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import generations
 from runs import require_latest_run_directory
 
 DATASET_FILENAME = "repo_files_sample"
@@ -333,17 +335,27 @@ def _short_model_name(model: str) -> str:
 
 def _trim_target(record: dict, generation: dict) -> dict:
     """Pull just the fields needed for the comparison view."""
-    results = []
-    prompt_text = ""
-    for result in generation.get("results") or []:
-        if not prompt_text and result.get("prompt"):
-            prompt_text = result["prompt"]
-        results.append(
-            {
-                "model": _short_model_name(result.get("model") or ""),
-                "comment": result.get("comment_text") or "",
-                "error": result.get("error"),
-            }
+    results = [
+        {
+            "model": _short_model_name(result.get("model") or ""),
+            "comment": result.get("comment_text") or "",
+            "error": result.get("error"),
+        }
+        for result in generation.get("results") or []
+    ]
+
+    # Newer generations store the prompt once on the generation; older ones
+    # repeated it on each result. Prefer the generation-level prompt, falling
+    # back to the first result that carries one.
+    prompt_text = generation.get("prompt") or ""
+    if not prompt_text:
+        prompt_text = next(
+            (
+                result["prompt"]
+                for result in generation.get("results") or []
+                if result.get("prompt")
+            ),
+            "",
         )
 
     repo = record.get("repo_name") or ""
@@ -410,15 +422,40 @@ def _build_generations_payload(generated_path: Path, source_name: str) -> dict:
     }
 
 
+def _build_generation_state(gen_dir: Path, base_sidebar: list[dict]) -> dict:
+    """Everything the handler needs to serve one generation: its output path, a
+    private copy of the source sidebar annotated with this generation's counts
+    and offsets, the display-ordered view of it, and where its notes live. Built
+    lazily and cached per generation so switching is cheap and generations never
+    contaminate each other's sidebar annotations."""
+    generated_path, generated_entries, _ = _load_index(gen_dir, GENERATED_FILENAME)
+    sidebar = copy.deepcopy(base_sidebar)
+    matched = _match_generated(sidebar, generated_entries)
+    logging.info(
+        "Matched %d of %d generated records for generation %s",
+        matched,
+        len(generated_entries),
+        gen_dir.name,
+    )
+    return {
+        "generated_path": generated_path,
+        "sidebar": sidebar,
+        "ordered_sidebar": _display_order(sidebar),
+        "notes_path": gen_dir / NOTES_FILENAME,
+        "payload": None,  # generations comparison payload, built on first request
+    }
+
+
 def _make_handler(
     html_bytes: bytes,
     source_path: Path,
-    generated_path: Path | None,
-    sidebar: list[dict],
-    ordered_sidebar: list[dict],
+    base_sidebar: list[dict],
+    base_ordered: list[dict],
     meta: dict,
     run_dir: Path,
-    generations_cache: dict,
+    generations_by_id: dict[str, dict],
+    default_gen_id: str | None,
+    states: dict[str, dict],
 ):
     class DashboardHandler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -439,9 +476,28 @@ def _make_handler(
             self.end_headers()
             self.wfile.write(html_bytes)
 
+        def _resolve_gen_id(self, params: dict[str, list[str]]) -> str | None:
+            """The generation the request targets: the `generation` query param
+            when it names a real generation, else the newest (default). (`gen`
+            is already taken by the records 'generated only' filter.)"""
+            requested = params.get("generation", [None])[0]
+            if requested and requested in generations_by_id:
+                return requested
+            return default_gen_id
+
+        def _generation_state(self, gen_id: str | None) -> dict | None:
+            if gen_id is None or gen_id not in generations_by_id:
+                return None
+            if gen_id not in states:
+                states[gen_id] = _build_generation_state(
+                    generations_by_id[gen_id]["dir"], base_sidebar
+                )
+            return states[gen_id]
+
         def do_GET(self):
             parsed = urlparse(self.path)
             path = unquote(parsed.path)
+            params = parse_qs(parsed.query)
 
             if path in ("/", "/index.html"):
                 self._send_html()
@@ -452,11 +508,14 @@ def _make_handler(
                 return
 
             if path == "/records":
-                self._send_json(_query_records(ordered_sidebar, parse_qs(parsed.query)))
+                state = self._generation_state(self._resolve_gen_id(params))
+                ordered = state["ordered_sidebar"] if state else base_ordered
+                self._send_json(_query_records(ordered, params))
                 return
 
             if path == "/generations":
-                if generated_path is None:
+                state = self._generation_state(self._resolve_gen_id(params))
+                if state is None:
                     self._send_json(
                         {
                             "generated_at": datetime.now(timezone.utc).isoformat(
@@ -468,16 +527,17 @@ def _make_handler(
                         }
                     )
                     return
-                payload = generations_cache.get("payload")
-                if payload is None:
-                    payload = _build_generations_payload(generated_path, run_dir.name)
-                    generations_cache["payload"] = payload
-                self._send_json(payload)
+                if state["payload"] is None:
+                    state["payload"] = _build_generations_payload(
+                        state["generated_path"], run_dir.name
+                    )
+                self._send_json(state["payload"])
                 return
 
             if path == "/notes":
-                notes_path = run_dir / NOTES_FILENAME
-                if notes_path.exists():
+                state = self._generation_state(self._resolve_gen_id(params))
+                notes_path = state["notes_path"] if state else None
+                if notes_path is not None and notes_path.exists():
                     self._send_json(json.loads(notes_path.read_text(encoding="utf-8")))
                 else:
                     self._send_json(
@@ -491,12 +551,14 @@ def _make_handler(
                 except ValueError:
                     self._send_json({"error": "invalid index"}, HTTPStatus.BAD_REQUEST)
                     return
+                state = self._generation_state(self._resolve_gen_id(params))
+                sidebar = state["sidebar"] if state else base_sidebar
                 if not (0 <= index < len(sidebar)):
                     self._send_json({"error": "out of range"}, HTTPStatus.NOT_FOUND)
                     return
                 entry = sidebar[index]
-                if generated_path is not None and "gen_offset" in entry:
-                    record = _read_record(generated_path, entry["gen_offset"])
+                if state is not None and "gen_offset" in entry:
+                    record = _read_record(state["generated_path"], entry["gen_offset"])
                     _attach_generation_diffs(record)
                 else:
                     record = _read_record(source_path, entry["offset"])
@@ -508,8 +570,16 @@ def _make_handler(
         def do_POST(self):
             parsed = urlparse(self.path)
             path = unquote(parsed.path)
+            params = parse_qs(parsed.query)
 
             if path == "/notes":
+                state = self._generation_state(self._resolve_gen_id(params))
+                if state is None:
+                    self._send_json(
+                        {"error": "no generation to attach notes to"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
                 length = int(self.headers.get("Content-Length", 0))
                 try:
                     body = json.loads(self.rfile.read(length) or b"{}")
@@ -519,11 +589,12 @@ def _make_handler(
                 saved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 payload = {
                     "run": run_dir.name,
+                    "generation": self._resolve_gen_id(params),
                     "saved_at": saved_at,
                     "failure_modes": body.get("failure_modes") or [],
                     "entries": body.get("entries") or {},
                 }
-                notes_path = run_dir / NOTES_FILENAME
+                notes_path = state["notes_path"]
                 notes_path.write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2),
                     encoding="utf-8",
@@ -549,30 +620,41 @@ def _pick_free_port() -> int:
 
 
 def serve(run_dir: Path, port: int | None, open_browser: bool) -> None:
-    source_path, sidebar, meta = _load_index(run_dir, DATASET_FILENAME)
+    source_path, base_sidebar, meta = _load_index(run_dir, DATASET_FILENAME)
+    base_ordered = _display_order(base_sidebar)
 
-    generated_path = None
-    if (run_dir / f"{GENERATED_FILENAME}.jsonl").exists():
-        generated_path, generated_entries, _ = _load_index(run_dir, GENERATED_FILENAME)
-        matched = _match_generated(sidebar, generated_entries)
-        logging.info(
-            "Matched %d of %d generated records", matched, len(generated_entries)
-        )
-    ordered_sidebar = _display_order(sidebar)
-    meta["has_generations"] = generated_path is not None
+    # One shared source, many generations. Each generation's sidebar annotations
+    # and notes are served on demand and cached per id (see _generation_state).
+    generation_list = generations.list_generations(run_dir)
+    generations_by_id = {gen["id"]: gen for gen in generation_list}
+    default_gen_id = generation_list[0]["id"] if generation_list else None
+    states: dict[str, dict] = {}
+
+    meta["has_generations"] = bool(generation_list)
+    meta["default_generation"] = default_gen_id
+    meta["generations"] = [
+        {
+            "id": gen["id"],
+            "label": gen["label"],
+            "created_at": gen["created_at"],
+            "model_names": gen["model_names"],
+            "config": gen["config"],
+        }
+        for gen in generation_list
+    ]
 
     html_bytes = DASHBOARD_HTML.read_bytes()
     chosen_port = port if port is not None else _pick_free_port()
-    generations_cache: dict = {}
     handler_class = _make_handler(
         html_bytes,
         source_path,
-        generated_path,
-        sidebar,
-        ordered_sidebar,
+        base_sidebar,
+        base_ordered,
         meta,
         run_dir,
-        generations_cache,
+        generations_by_id,
+        default_gen_id,
+        states,
     )
     server = ThreadingHTTPServer(("127.0.0.1", chosen_port), handler_class)
     url = f"http://127.0.0.1:{chosen_port}/"

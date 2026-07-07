@@ -30,6 +30,14 @@ def parse_args():
         "--generate", action="store_true", help="Generate comments for collected data"
     )
     parser.add_argument(
+        "--generation",
+        type=str,
+        default=None,
+        help="Label for this generation, written under "
+        "runs/<run>/generations/<label>/ (defaults to a timestamp). Re-running a "
+        "label overwrites its output but keeps its review notes",
+    )
+    parser.add_argument(
         "--report", action="store_true", help="Build dataset statistics and graphs"
     )
     parser.add_argument(
@@ -152,7 +160,9 @@ def main():
     if args.finalize:
         finalize_collection(run_dir)
     if args.generate:
-        generate_comments_for_dataset(run_dir, limit=args.max_generate)
+        generate_comments_for_dataset(
+            run_dir, label=args.generation, limit=args.max_generate
+        )
     if args.report:
         generate_report(run_dir, args.report_dataset)
 
