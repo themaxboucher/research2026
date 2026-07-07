@@ -499,7 +499,7 @@ def _comment_generation(
 
 def _target_comments(source_file: dict) -> list[dict]:
     TARGET_COMMENT_TYPES = {"inline", "block"}
-    TARGET_COMMENT_STATUSES = {"added", "modified"}
+    TARGET_COMMENT_STATUSES = {"added"}
     return [
         comment
         for comment in (source_file.get("comments") or [])
