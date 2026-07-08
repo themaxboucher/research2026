@@ -1292,10 +1292,15 @@
          with the syntax-highlighter's own background; the per-line content spans
          are made transparent so blank lines don't show through as dark bars. */
       #intent-view .intent-code {
+        position: relative; /* so scroll-to-comment can use row.offsetTop */
         background: var(--bg);
         border: 1px solid var(--border-muted);
         border-radius: 8px;
         overflow: auto;
+      }
+      /* Expanded to the full file: cap the height and scroll internally. */
+      #intent-view .intent-code.expanded {
+        max-height: 480px;
       }
       #intent-view .intent-code .code-wrap {
         padding: 6px 0;
@@ -1305,6 +1310,23 @@
       }
       #intent-view .intent-code .code-line .content.hljs {
         background: transparent;
+      }
+      #intent-view .intent-code-head .intent-expand-btn {
+        margin-left: auto;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        border-radius: 6px;
+        padding: 3px 10px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: none;
+        letter-spacing: normal;
+        cursor: pointer;
+      }
+      #intent-view .intent-code-head .intent-expand-btn:hover {
+        color: var(--text);
+        border-color: var(--text-muted);
       }
       .gen-view .note-input {
         width: 100%;
@@ -2369,7 +2391,10 @@
         ui.highlightCode();
       }
 
-      function renderCode(panel, code, comments) {
+      // `startLine` is the file line number of the first rendered line, so the
+      // gutter can show real file positions for a slice (defaults to 1 for a
+      // whole file). Comment line numbers in `comments` are absolute too.
+      function renderCode(panel, code, comments, startLine = 1) {
         if (code == null) {
           panel.innerHTML = `<div class="empty-state">No content for this variant.</div>`;
           return;
@@ -2395,7 +2420,7 @@
         const highlightedLines = highlighted.split("\n");
         const frag = document.createDocumentFragment();
         for (let i = 0; i < lines.length; i++) {
-          const lineNumber = i + 1;
+          const lineNumber = startLine + i;
           const row = document.createElement("div");
           row.className = "code-line";
           if (commentLineSet.has(lineNumber)) row.classList.add("has-comment");
@@ -3946,13 +3971,15 @@
         how: "How the code works (mechanism)",
         other: "None of the above",
       };
+      const CONTEXT_LINES = 10; // lines shown above/below the comment by default
       const intentState = {
         loaded: false,
         data: null,
         entries: {}, // key -> "why" | "what" | "how" | null (cleared)
         dirty: false,
         query: "",
-        expanded: new Set(),
+        expanded: new Set(), // cards expanded (header collapse)
+        fileExpanded: new Set(), // cards showing the full file vs the window
         cardByKey: {},
         cardEls: [],
         blockEls: [],
@@ -4077,19 +4104,56 @@
         commentWrap.appendChild(genCommentBlock("human", "Human", target.comment, null));
         body.appendChild(commentWrap);
 
-        const codeLabel = document.createElement("div");
-        codeLabel.className = "section-label";
-        codeLabel.textContent = "Scope";
-        body.appendChild(codeLabel);
+        const codeHead = document.createElement("div");
+        codeHead.className = "section-label intent-code-head";
+        const codeTitle = document.createElement("span");
+        codeTitle.textContent = "Code";
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "intent-expand-btn";
+        codeHead.append(codeTitle, toggle);
+        body.appendChild(codeHead);
+
         const codeWrap = document.createElement("div");
         codeWrap.className = "prompt-wrap";
         const codeBox = document.createElement("div");
         codeBox.className = "intent-code";
-        renderCode(codeBox, target.scope_code, [
-          { start_line: target.comment_start, end_line: target.comment_end },
-        ]);
         codeWrap.appendChild(codeBox);
         body.appendChild(codeWrap);
+
+        // Show the comment with CONTEXT_LINES above/below by default; expand to
+        // the whole file (rendered from the inline source) in a scroll box.
+        const commentSpan = [
+          { start_line: target.comment_start, end_line: target.comment_end },
+        ];
+        const renderCodeRegion = () => {
+          const expanded = intentState.fileExpanded.has(key);
+          codeBox.classList.toggle("expanded", expanded);
+          codeBox.innerHTML = "";
+          if (expanded) {
+            renderCode(codeBox, target.source_code, commentSpan, 1);
+            const row = codeBox.querySelector(".code-line.has-comment");
+            // Defer so the box is laid out (has a clientHeight) before centering.
+            if (row) {
+              requestAnimationFrame(() => {
+                codeBox.scrollTop = row.offsetTop - codeBox.clientHeight / 2;
+              });
+            }
+          } else {
+            const fileLines = target.source_code.split("\n");
+            const winStart = Math.max(1, target.comment_start - CONTEXT_LINES);
+            const winEnd = Math.min(fileLines.length, target.comment_end + CONTEXT_LINES);
+            const slice = fileLines.slice(winStart - 1, winEnd).join("\n");
+            renderCode(codeBox, slice, commentSpan, winStart);
+          }
+          toggle.textContent = expanded ? "Collapse" : "Show full file";
+        };
+        toggle.addEventListener("click", () => {
+          if (intentState.fileExpanded.has(key)) intentState.fileExpanded.delete(key);
+          else intentState.fileExpanded.add(key);
+          renderCodeRegion();
+        });
+        renderCodeRegion();
 
         const intentLabel = document.createElement("div");
         intentLabel.className = "section-label";

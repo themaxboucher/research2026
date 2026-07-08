@@ -104,30 +104,3 @@ def scope_code(source_code: str, comment_data: dict) -> str:
         # A block target is wholly comment, so its lines vanish entirely.
 
     return "\n".join(output_lines)
-
-
-def scope_code_with_comment(source_code: str, comment_data: dict) -> tuple[str, int, int]:
-    """Return the enclosing scope's source with the target comment kept in
-    place, plus the comment's 1-indexed line span *within the returned scope*
-    (for highlighting). Unlike scope_code, nothing is stripped — the labeler
-    needs to see the comment to judge its intent."""
-    source_lines = source_code.splitlines()
-    start, end = _scope_bounds(source_code, source_lines, comment_data["start_line"])
-
-    target_start = comment_data["start_line"]
-    target_end = comment_data["end_line"]
-
-    # The scope lookup can miss the comment — a trailing block comment sitting
-    # past the scope's AST end line, or a duplicate qualified name resolving to
-    # the wrong node. The comment must always be visible, so widen to include
-    # it, falling back to a small window when that union would be unwieldy.
-    start = min(start, target_start)
-    end = max(end, target_end)
-    if end - start + 1 > MAX_SCOPE_LINE_COUNT:
-        start = max(1, target_start - 20)
-        end = min(len(source_lines), target_end + 20)
-
-    scope_lines = source_lines[start - 1 : end]
-    comment_start = target_start - start + 1
-    comment_end = target_end - start + 1
-    return "\n".join(scope_lines), comment_start, comment_end

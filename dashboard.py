@@ -16,7 +16,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import generations
-import scopes
 from comments import is_machine_directive_comment
 from runs import require_latest_run_directory
 
@@ -518,17 +517,16 @@ def _build_intent_map(source_path: Path) -> dict[str, str]:
 
 
 def _build_intents_payload(source_path: Path) -> dict:
-    """The intent-labeling view: every target comment with the scope it lives in
-    (comment kept and located for highlighting) and its current label."""
+    """The intent-labeling view: every target comment with its full source file
+    and the comment's absolute line span, plus the comment's current label. The
+    client renders a small window around the comment and expands to the full file
+    on demand."""
     targets: list[dict] = []
     for record in _iter_source_records(source_path):
         source_code = record.get("source_code") or ""
         for comment in record.get("comments") or []:
             if not _is_intent_target(comment):
                 continue
-            scope_code, comment_start, comment_end = scopes.scope_code_with_comment(
-                source_code, comment
-            )
             intent = comment.get("intent")
             targets.append(
                 {
@@ -542,9 +540,9 @@ def _build_intents_payload(source_path: Path) -> dict:
                     "start_line": comment.get("start_line"),
                     "end_line": comment.get("end_line"),
                     "comment": comment.get("comment") or "",
-                    "scope_code": scope_code,
-                    "comment_start": comment_start,
-                    "comment_end": comment_end,
+                    "source_code": source_code,
+                    "comment_start": comment.get("start_line"),
+                    "comment_end": comment.get("end_line"),
                     "intent": intent if intent in INTENT_VALUES else None,
                 }
             )
