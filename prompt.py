@@ -74,16 +74,15 @@ def _build_modify_prompt(
 
 
 def _build_add_prompt(
-    repo_name: str, filepath: str, comment_data: dict, scope_code: str
+    repo_name: str, filepath: str, comment_data: dict, intent: str, scope_code: str
 ) -> str:
     template = STATUS_TEMPLATE_PATHS["added"].read_text(encoding="utf-8")
-    INTENT = "why"
     return (
         template.replace("{repo_name}", repo_name)
         .replace("{filepath}", filepath)
         .replace("{comment_type}", comment_data["type"])
         .replace("{scope_code}", scope_code)
-        .replace("{intent_instruction}", _intent_instruction(INTENT))
+        .replace("{intent_instruction}", _intent_instruction(intent))
         .replace(
             "{location_instruction}",
             _location_instruction(comment_data),
@@ -97,6 +96,7 @@ def build_prompt(
     filepath: str,
     comment_data: dict,
     status: str,
+    intent: str,
     scope_code: str | None = None,
     diff_hunk: str | None = None,
     unmodified_comment: str | None = None,
@@ -113,4 +113,4 @@ def build_prompt(
     if scope_code is None:
         raise ValueError("Scope code is required for added comments")
 
-    return _build_add_prompt(repo_name, filepath, comment_data, scope_code)
+    return _build_add_prompt(repo_name, filepath, comment_data, intent, scope_code)

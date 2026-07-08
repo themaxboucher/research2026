@@ -3,7 +3,9 @@ import copy
 import difflib
 import json
 import logging
+import os
 import re
+import shutil
 import socket
 import sys
 import webbrowser
@@ -14,6 +16,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import generations
+import scopes
+from comments import is_machine_directive_comment
 from runs import require_latest_run_directory
 
 DATASET_FILENAME = "repo_files_sample"
@@ -23,8 +27,12 @@ DASHBOARD_HTML = Path(__file__).parent / "dashboard.html"
 DEFAULT_PAGE_LIMIT = 200
 MAX_PAGE_LIMIT = 1000
 
+# The intent labels a human comment can carry (why the code is as it is, what
+# the code does, or how it works). Stored on the comment in the source dataset.
+INTENT_VALUES = ("why", "what", "how")
+
 # Bump when the cached index schema changes so stale caches are rebuilt.
-INDEX_VERSION = 5
+INDEX_VERSION = 6
 
 SIDEBAR_FIELDS = (
     "repo_name",
@@ -40,7 +48,7 @@ SIDEBAR_FIELDS = (
 # Comments surfaced inline under each file in the sidebar.
 SIDEBAR_COMMENT_TYPES = {"inline", "block"}
 SIDEBAR_COMMENT_STATUSES = {"added", "modified"}
-SIDEBAR_COMMENT_FIELDS = ("type", "status", "start_line", "end_line", "comment")
+SIDEBAR_COMMENT_FIELDS = ("type", "status", "start_line", "end_line", "comment", "intent")
 
 META_FIELDS = (
     "count",
@@ -314,6 +322,62 @@ def _query_records(ordered_sidebar: list[dict], params: dict[str, list[str]]) ->
     return {"rows": matched[offset : offset + limit], "total": len(matched)}
 
 
+# --- Comment identity & intent -------------------------------------------
+# A comment's stable identity across the source, the generations, and the
+# review/intent stores: repo, short commit, path, type, and line span. The same
+# string is used as the key everywhere so intent labels attach consistently.
+
+
+def _comment_key(record: dict, comment: dict) -> str:
+    repo = record.get("repo_name") or ""
+    commit = (record.get("commit_hash") or "")[:7]
+    path = record.get("new_path") or record.get("filename") or ""
+    return "|".join(
+        str(part)
+        for part in (
+            repo,
+            commit,
+            path,
+            comment.get("type") or "",
+            comment.get("start_line"),
+            comment.get("end_line"),
+        )
+    )
+
+
+def _is_intent_target(comment: dict) -> bool:
+    """The comments eligible for intent labeling: the same set the generation
+    pipeline targets (added inline/block comments that aren't machine
+    directives)."""
+    return (
+        comment.get("type") in SIDEBAR_COMMENT_TYPES
+        and comment.get("status") == "added"
+        and comment.get("comment") is not None
+        and not is_machine_directive_comment(comment["comment"])
+    )
+
+
+def _stamp_sidebar_intents(sidebar: list[dict], intent_map: dict[str, str]) -> None:
+    """Overlay the source's intent labels onto sidebar comments. Needed because a
+    generation's copied comments predate labeling and so lack intent."""
+    if not intent_map:
+        return
+    for entry in sidebar:
+        for comment in entry.get("sidebar_comments") or []:
+            comment["intent"] = intent_map.get(_comment_key(entry, comment))
+
+
+def _stamp_record_intents(record: dict, intent_map: dict[str, str]) -> None:
+    """Overlay intent labels onto a full record's comments, so the comment-detail
+    panel shows them even for a generation's (pre-labeling) copied comments."""
+    if not intent_map:
+        return
+    for comment in record.get("comments") or []:
+        key = _comment_key(record, comment)
+        if key in intent_map:
+            comment["intent"] = intent_map[key]
+
+
 # --- Generations analysis view -------------------------------------------
 # The "Generations" view is a flat comparison of every comment-generation
 # target: the prompt sent to the models, the human's comment, and each model's
@@ -333,7 +397,7 @@ def _short_model_name(model: str) -> str:
     return model.split("/")[-1] if model else "(unknown)"
 
 
-def _trim_target(record: dict, generation: dict) -> dict:
+def _trim_target(record: dict, generation: dict, intent_map: dict[str, str]) -> dict:
     """Pull just the fields needed for the comparison view."""
     results = [
         {
@@ -361,31 +425,29 @@ def _trim_target(record: dict, generation: dict) -> dict:
     repo = record.get("repo_name") or ""
     commit = (record.get("commit_hash") or "")[:7]
     path = record.get("new_path") or record.get("filename") or ""
-    type_ = generation.get("type") or ""
-    start_line = generation.get("start_line")
-    end_line = generation.get("end_line")
-    # Stable identity for attaching review notes, robust to list reordering.
-    key = "|".join(
-        str(part) for part in (repo, commit, path, type_, start_line, end_line)
-    )
+    # Stable identity for attaching review notes and intent, robust to reordering.
+    key = _comment_key(record, generation)
 
     return {
         "key": key,
         "repo": repo,
         "commit": commit,
         "path": path,
-        "type": type_,
+        "type": generation.get("type") or "",
         "status": generation.get("status") or "",
         "anchor": generation.get("anchor") or "",
-        "start_line": start_line,
-        "end_line": end_line,
+        "start_line": generation.get("start_line"),
+        "end_line": generation.get("end_line"),
         "prompt": _prompt_to_markdown(prompt_text),
         "human": generation.get("comment") or "",
+        "intent": intent_map.get(key) if intent_map else None,
         "results": results,
     }
 
 
-def _collect_targets(generated_path: Path) -> tuple[list[dict], set[str]]:
+def _collect_targets(
+    generated_path: Path, intent_map: dict[str, str]
+) -> tuple[list[dict], set[str]]:
     targets: list[dict] = []
     models: set[str] = set()
     with generated_path.open("r", encoding="utf-8") as source_file:
@@ -399,7 +461,7 @@ def _collect_targets(generated_path: Path) -> tuple[list[dict], set[str]]:
                 logging.warning("Skipping unparseable line in %s", generated_path)
                 continue
             for generation in record.get("comment_generations") or []:
-                target = _trim_target(record, generation)
+                target = _trim_target(record, generation, intent_map)
                 for result in target["results"]:
                     if result["model"]:
                         models.add(result["model"])
@@ -407,8 +469,10 @@ def _collect_targets(generated_path: Path) -> tuple[list[dict], set[str]]:
     return targets, models
 
 
-def _build_generations_payload(generated_path: Path, source_name: str) -> dict:
-    targets, models = _collect_targets(generated_path)
+def _build_generations_payload(
+    generated_path: Path, source_name: str, intent_map: dict[str, str]
+) -> dict:
+    targets, models = _collect_targets(generated_path, intent_map)
     logging.info(
         "Built generations view: %d targets across %d models",
         len(targets),
@@ -422,7 +486,119 @@ def _build_generations_payload(generated_path: Path, source_name: str) -> dict:
     }
 
 
-def _build_generation_state(gen_dir: Path, base_sidebar: list[dict]) -> dict:
+# --- Intent labeling view -------------------------------------------------
+# Labeling each human comment's intent (why the code is as it is / what it does /
+# how it works). Targets come from the source dataset (shared across
+# generations); labels are written back onto the comments in
+# repo_files_sample.jsonl.
+
+
+def _iter_source_records(source_path: Path):
+    with source_path.open("r", encoding="utf-8") as source_file:
+        for raw_line in source_file:
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            try:
+                yield json.loads(stripped)
+            except ValueError:
+                logging.warning("Skipping unparseable line in %s", source_path)
+                continue
+
+
+def _build_intent_map(source_path: Path) -> dict[str, str]:
+    """{comment key -> intent} for every source comment that carries a label."""
+    intent_map: dict[str, str] = {}
+    for record in _iter_source_records(source_path):
+        for comment in record.get("comments") or []:
+            if comment.get("intent") in INTENT_VALUES:
+                intent_map[_comment_key(record, comment)] = comment["intent"]
+    return intent_map
+
+
+def _build_intents_payload(source_path: Path) -> dict:
+    """The intent-labeling view: every target comment with the scope it lives in
+    (comment kept and located for highlighting) and its current label."""
+    targets: list[dict] = []
+    for record in _iter_source_records(source_path):
+        source_code = record.get("source_code") or ""
+        for comment in record.get("comments") or []:
+            if not _is_intent_target(comment):
+                continue
+            scope_code, comment_start, comment_end = scopes.scope_code_with_comment(
+                source_code, comment
+            )
+            intent = comment.get("intent")
+            targets.append(
+                {
+                    "key": _comment_key(record, comment),
+                    "repo": record.get("repo_name") or "",
+                    "commit": (record.get("commit_hash") or "")[:7],
+                    "path": record.get("new_path") or record.get("filename") or "",
+                    "type": comment.get("type") or "",
+                    "status": comment.get("status") or "",
+                    "anchor": comment.get("anchor") or "",
+                    "start_line": comment.get("start_line"),
+                    "end_line": comment.get("end_line"),
+                    "comment": comment.get("comment") or "",
+                    "scope_code": scope_code,
+                    "comment_start": comment_start,
+                    "comment_end": comment_end,
+                    "intent": intent if intent in INTENT_VALUES else None,
+                }
+            )
+    logging.info("Built intent view: %d target comments", len(targets))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": source_path.parent.name,
+        "targets": targets,
+    }
+
+
+def _write_intents_to_source(source_path: Path, intents: dict[str, str]) -> int:
+    """Write intent labels back onto the matching source comments. Backs the file
+    up once, then rewrites it atomically. `intents` is the client's full view of
+    every comment it has an opinion on (a label, or null to clear). Returns the
+    number of comments whose label changed."""
+    backup_path = source_path.parent / (source_path.name + ".bak")
+    if not backup_path.exists():
+        shutil.copy2(source_path, backup_path)
+        logging.info("Backed up source dataset to %s", backup_path)
+
+    changed = 0
+    tmp_path = source_path.parent / (source_path.name + ".tmp")
+    with (
+        source_path.open("r", encoding="utf-8") as source_file,
+        tmp_path.open("w", encoding="utf-8") as tmp_file,
+    ):
+        for raw_line in source_file:
+            stripped = raw_line.strip()
+            if not stripped:
+                tmp_file.write(raw_line)
+                continue
+            record = json.loads(stripped)
+            for comment in record.get("comments") or []:
+                key = _comment_key(record, comment)
+                if key not in intents:
+                    continue
+                new_intent = intents[key] or None
+                if new_intent is not None and new_intent not in INTENT_VALUES:
+                    continue  # ignore unknown label values
+                if comment.get("intent") != new_intent:
+                    changed += 1
+                if new_intent is None:
+                    comment.pop("intent", None)
+                else:
+                    comment["intent"] = new_intent
+            tmp_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+    os.replace(tmp_path, source_path)
+    logging.info("Wrote %d intent change(s) to %s", changed, source_path)
+    return changed
+
+
+def _build_generation_state(
+    gen_dir: Path, base_sidebar: list[dict], intent_map: dict[str, str]
+) -> dict:
     """Everything the handler needs to serve one generation: its output path, a
     private copy of the source sidebar annotated with this generation's counts
     and offsets, the display-ordered view of it, and where its notes live. Built
@@ -431,6 +607,9 @@ def _build_generation_state(gen_dir: Path, base_sidebar: list[dict]) -> dict:
     generated_path, generated_entries, _ = _load_index(gen_dir, GENERATED_FILENAME)
     sidebar = copy.deepcopy(base_sidebar)
     matched = _match_generated(sidebar, generated_entries)
+    # A generation's copied comments predate labeling, so re-stamp intent from
+    # the source so the sidebar's intent chips are correct here too.
+    _stamp_sidebar_intents(sidebar, intent_map)
     logging.info(
         "Matched %d of %d generated records for generation %s",
         matched,
@@ -456,6 +635,8 @@ def _make_handler(
     generations_by_id: dict[str, dict],
     default_gen_id: str | None,
     states: dict[str, dict],
+    intent_map: dict[str, str],
+    intents_cache: dict,
 ):
     class DashboardHandler(BaseHTTPRequestHandler):
         def log_message(self, format, *args):
@@ -490,7 +671,7 @@ def _make_handler(
                 return None
             if gen_id not in states:
                 states[gen_id] = _build_generation_state(
-                    generations_by_id[gen_id]["dir"], base_sidebar
+                    generations_by_id[gen_id]["dir"], base_sidebar, intent_map
                 )
             return states[gen_id]
 
@@ -529,9 +710,15 @@ def _make_handler(
                     return
                 if state["payload"] is None:
                     state["payload"] = _build_generations_payload(
-                        state["generated_path"], run_dir.name
+                        state["generated_path"], run_dir.name, intent_map
                     )
                 self._send_json(state["payload"])
+                return
+
+            if path == "/intents":
+                if intents_cache.get("payload") is None:
+                    intents_cache["payload"] = _build_intents_payload(source_path)
+                self._send_json(intents_cache["payload"])
                 return
 
             if path == "/notes":
@@ -562,6 +749,7 @@ def _make_handler(
                     _attach_generation_diffs(record)
                 else:
                     record = _read_record(source_path, entry["offset"])
+                _stamp_record_intents(record, intent_map)
                 self._send_json(record)
                 return
 
@@ -571,6 +759,22 @@ def _make_handler(
             parsed = urlparse(self.path)
             path = unquote(parsed.path)
             params = parse_qs(parsed.query)
+
+            if path == "/intents":
+                length = int(self.headers.get("Content-Length", 0))
+                try:
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                except ValueError:
+                    self._send_json({"error": "invalid JSON"}, HTTPStatus.BAD_REQUEST)
+                    return
+                entries = body.get("entries") or {}
+                changed = _write_intents_to_source(source_path, entries)
+                # The source changed on disk; drop the cached view so the next
+                # read reflects it. (Other views pick it up on restart.)
+                intents_cache["payload"] = None
+                saved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                self._send_json({"ok": True, "changed": changed, "saved_at": saved_at})
+                return
 
             if path == "/notes":
                 state = self._generation_state(self._resolve_gen_id(params))
@@ -621,6 +825,14 @@ def _pick_free_port() -> int:
 
 def serve(run_dir: Path, port: int | None, open_browser: bool) -> None:
     source_path, base_sidebar, meta = _load_index(run_dir, DATASET_FILENAME)
+
+    # Intent labels live on the source comments, shared across generations. Build
+    # the {key -> intent} map once and stamp it onto every sidebar view so the
+    # chips are consistent everywhere (rebuilt on restart after a save).
+    intent_map = _build_intent_map(source_path)
+    _stamp_sidebar_intents(base_sidebar, intent_map)
+    intents_cache: dict = {}
+
     base_ordered = _display_order(base_sidebar)
 
     # One shared source, many generations. Each generation's sidebar annotations
@@ -632,6 +844,7 @@ def serve(run_dir: Path, port: int | None, open_browser: bool) -> None:
 
     meta["has_generations"] = bool(generation_list)
     meta["default_generation"] = default_gen_id
+    meta["intent_values"] = list(INTENT_VALUES)
     meta["generations"] = [
         {
             "id": gen["id"],
@@ -655,6 +868,8 @@ def serve(run_dir: Path, port: int | None, open_browser: bool) -> None:
         generations_by_id,
         default_gen_id,
         states,
+        intent_map,
+        intents_cache,
     )
     server = ThreadingHTTPServer(("127.0.0.1", chosen_port), handler_class)
     url = f"http://127.0.0.1:{chosen_port}/"

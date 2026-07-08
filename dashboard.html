@@ -1183,6 +1183,100 @@
         color: var(--chip-add-fg);
         font-weight: 600;
       }
+
+      /* ===== Intent view (Why / What / How labeling) ===== */
+      /* Chip is used in the intent, generations, AND full-data views, so it is
+         defined without a .gen-view prefix. */
+      .intent-chip {
+        display: inline-block;
+        padding: 1px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        border: 1px solid transparent;
+      }
+      .intent-chip.why {
+        background: rgba(224, 160, 62, 0.18);
+        color: #e0a03e;
+        border-color: rgba(224, 160, 62, 0.4);
+      }
+      .intent-chip.what {
+        background: rgba(76, 155, 232, 0.18);
+        color: #4c9be8;
+        border-color: rgba(76, 155, 232, 0.4);
+      }
+      .intent-chip.how {
+        background: rgba(160, 110, 224, 0.2);
+        color: #b98ce8;
+        border-color: rgba(160, 110, 224, 0.4);
+      }
+      .gen-view .target-card.labeled {
+        border-color: rgba(76, 155, 232, 0.4);
+      }
+      .gen-view .target-card.labeled .card-header {
+        background: rgba(76, 155, 232, 0.06);
+      }
+      .gen-view .gen-progress .pblock.labeled {
+        background: #4c9be8;
+      }
+      .intent-control {
+        display: flex;
+        gap: 8px;
+        margin: 4px 0 2px;
+      }
+      .intent-btn {
+        flex: 1;
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        color: var(--text-muted);
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: capitalize;
+        cursor: pointer;
+      }
+      .intent-btn:hover {
+        color: var(--text);
+        border-color: var(--text-muted);
+      }
+      .intent-btn.why.active {
+        background: rgba(224, 160, 62, 0.18);
+        color: #e0a03e;
+        border-color: #e0a03e;
+      }
+      .intent-btn.what.active {
+        background: rgba(76, 155, 232, 0.18);
+        color: #4c9be8;
+        border-color: #4c9be8;
+      }
+      .intent-btn.how.active {
+        background: rgba(160, 110, 224, 0.2);
+        color: #b98ce8;
+        border-color: #a06ee0;
+      }
+      .intent-summary {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+        padding: 4px 2px 12px;
+      }
+      .intent-stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .intent-stat.total {
+        margin-left: auto;
+        font-weight: 600;
+        color: var(--text);
+      }
       .gen-view .note-input {
         width: 100%;
         margin-top: 8px;
@@ -1643,6 +1737,7 @@
       <span class="meta" id="dataset-meta"></span>
       <div class="view-toggle" id="view-toggle" style="display: none">
         <button data-view="data" class="active">Full data</button>
+        <button data-view="intent">Intent</button>
         <button data-view="gen">Generations</button>
       </div>
       <select
@@ -1666,6 +1761,26 @@
       <button
         type="button"
         id="gen-save"
+        class="gen-save clean"
+        style="display: none"
+      >
+        Saved
+      </button>
+      <input
+        type="text"
+        id="intent-search"
+        class="gen-search"
+        placeholder="Filter by repo, path, or comment text"
+        style="display: none"
+      />
+      <span
+        id="intent-review-count"
+        class="gen-review-count"
+        style="display: none"
+      ></span>
+      <button
+        type="button"
+        id="intent-save"
         class="gen-save clean"
         style="display: none"
       >
@@ -1700,6 +1815,15 @@
       <div class="gen-inner" id="gen-root"></div>
       <footer class="gen-footer">
         <span id="gen-count"></span> · built from <span id="gen-source"></span>
+      </footer>
+    </div>
+
+    <div class="gen-view" id="intent-view" style="display: none">
+      <div class="gen-progress" id="intent-progress" aria-hidden="true"></div>
+      <div class="gen-inner" id="intent-summary" style="padding-bottom: 0"></div>
+      <div class="gen-inner" id="intent-root"></div>
+      <footer class="gen-footer">
+        <span id="intent-count"></span> · from <span id="intent-source"></span>
       </footer>
     </div>
 
@@ -1791,9 +1915,9 @@
         document.getElementById("dataset-meta").textContent =
           `${meta.count} records across ${meta.repo_count} repos · ${meta.comment_count} comments (${meta.sidebar_comment_count} added/modified inline/block)`;
         state.changeTypes = meta.change_types || [];
-        if (meta.has_generations) {
-          document.getElementById("view-toggle").style.display = "flex";
-        }
+        // Intent labeling works from the source alone, so the view toggle is
+        // always available (the Generations tab just shows empty without runs).
+        document.getElementById("view-toggle").style.display = "flex";
         state.generations = meta.generations || [];
         state.generation = meta.default_generation || null;
         initGenerationSelect();
@@ -2066,6 +2190,12 @@
               ? `L${c.start_line}`
               : `L${c.start_line}-${c.end_line}`;
           meta.append(line);
+          if (c.intent) {
+            const intentChip = document.createElement("span");
+            intentChip.className = "intent-chip " + c.intent;
+            intentChip.textContent = c.intent;
+            meta.append(intentChip);
+          }
 
           const text = document.createElement("div");
           text.className = "rc-text";
@@ -2424,6 +2554,7 @@
       <span class="comment-type-chip ${escapeHTML(comment.type || "")}">${escapeHTML(comment.type || "")}</span>
       <span class="status-pill ${escapeHTML(comment.status || "")}">${escapeHTML(comment.status || "")}</span>
       <span class="cd-line">${escapeHTML(lines)}</span>
+      ${!model && comment.intent ? `<span class="intent-chip ${comment.intent}">${comment.intent}</span>` : ""}
       ${anchorHTML}
     </div>
     <pre class="cd-comment-text"></pre>
@@ -2658,15 +2789,22 @@
 
       function setView(view) {
         const isGen = view === "gen";
-        document.querySelector("main").style.display = isGen ? "none" : "";
+        const isIntent = view === "intent";
+        document.querySelector("main").style.display =
+          isGen || isIntent ? "none" : "";
         document.getElementById("gen-view").style.display = isGen ? "" : "none";
+        document.getElementById("intent-view").style.display = isIntent ? "" : "none";
         for (const id of ["gen-search", "gen-review-count", "gen-save"]) {
           document.getElementById(id).style.display = isGen ? "" : "none";
+        }
+        for (const id of ["intent-search", "intent-review-count", "intent-save"]) {
+          document.getElementById(id).style.display = isIntent ? "" : "none";
         }
         for (const button of document.querySelectorAll("#view-toggle button")) {
           button.classList.toggle("active", button.dataset.view === view);
         }
         if (isGen) ensureGenerations();
+        if (isIntent) ensureIntents();
       }
 
       async function ensureGenerations() {
@@ -2966,6 +3104,9 @@
         const statusChip = target.status
           ? `<span class="gchip ${escapeHTML(target.status)}">${escapeHTML(target.status)}</span>`
           : "";
+        const intentChip = target.intent
+          ? `<span class="intent-chip ${target.intent}">${target.intent}</span>`
+          : "";
         const anchor = target.anchor
           ? `<span class="anchor-pill" title="${escapeHTML(target.anchor)}">${escapeHTML(target.anchor)}</span>`
           : "";
@@ -2980,7 +3121,7 @@
             <div class="ch-top">
               ${repo}
               <span class="path" title="${path}">${path}</span>
-              <span class="ch-chips">${typeChip}${statusChip}</span>
+              <span class="ch-chips">${typeChip}${statusChip}${intentChip}</span>
             </div>
             <div class="ch-meta">
               ${commit ? `<span class="commit">@${commit}</span>` : ""}
@@ -3745,7 +3886,10 @@
       window.addEventListener("keydown", (event) => {
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
           event.preventDefault();
-          saveNotes();
+          const inIntentView =
+            document.getElementById("intent-view").style.display !== "none";
+          if (inIntentView) saveIntents();
+          else saveNotes();
         }
         if (
           event.key === "Escape" &&
@@ -3755,11 +3899,366 @@
         }
       });
       window.addEventListener("beforeunload", (event) => {
-        if (gen.dirty) {
+        if (gen.dirty || intentState.dirty) {
           event.preventDefault();
           event.returnValue = "";
         }
       });
+
+      // ===== Intent labeling view =====
+      // Parallel to the generations view but source-based and model-free: each
+      // target comment is shown in the scope it lives in and labeled Why / What
+      // / How. Labels are held in memory and flushed to repo_files_sample.jsonl
+      // by the Save button.
+      const INTENT_LABELS = ["why", "what", "how"];
+      const INTENT_TITLES = {
+        why: "Why the code is written this way (rationale)",
+        what: "What the code does (summary)",
+        how: "How the code works (mechanism)",
+      };
+      const intentState = {
+        loaded: false,
+        data: null,
+        entries: {}, // key -> "why" | "what" | "how" | null (cleared)
+        dirty: false,
+        query: "",
+        expanded: new Set(),
+        cardByKey: {},
+        cardEls: [],
+        blockEls: [],
+        blockByKey: {},
+      };
+
+      async function ensureIntents() {
+        if (intentState.loaded) return;
+        intentState.loaded = true;
+        const response = await fetch("/intents");
+        intentState.data = await response.json();
+        intentState.entries = {};
+        for (const target of intentState.data.targets) {
+          if (target.intent) intentState.entries[target.key] = target.intent;
+        }
+        intentState.dirty = false;
+        renderIntents();
+        updateIntentSave();
+      }
+
+      function intentHaystack(target) {
+        return [target.repo, target.path, target.comment, target.anchor, target.scope_code]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+      }
+
+      function renderIntents() {
+        if (!intentState.data) return;
+        const root = document.getElementById("intent-root");
+        root.innerHTML = "";
+        intentState.cardByKey = {};
+        const query = intentState.query.trim().toLowerCase();
+        const filtered = query
+          ? intentState.data.targets.filter((t) => intentHaystack(t).includes(query))
+          : intentState.data.targets;
+
+        const cards = [];
+        if (!filtered.length) {
+          const empty = document.createElement("div");
+          empty.className = "gen-empty";
+          empty.innerHTML = `<h2>No matches</h2><p>Try a different search term.</p>`;
+          root.appendChild(empty);
+        } else {
+          for (const target of filtered) {
+            const card = buildIntentCard(target);
+            cards.push(card);
+            root.appendChild(card);
+          }
+        }
+        buildIntentProgress(filtered, cards);
+
+        const repoCount = new Set(intentState.data.targets.map((t) => t.repo)).size;
+        document.getElementById("intent-count").textContent =
+          `${filtered.length}${query ? ` of ${intentState.data.targets.length}` : ""} ` +
+          `comment${filtered.length === 1 ? "" : "s"} · ` +
+          `${repoCount} repo${repoCount === 1 ? "" : "s"}`;
+        document.getElementById("intent-source").textContent = intentState.data.source;
+        renderIntentSummary();
+        updateIntentCount();
+      }
+
+      function buildIntentCard(target) {
+        const key = target.key;
+        const current = intentState.entries[key] || null;
+        const collapsed = !intentState.expanded.has(key);
+        const card = document.createElement("section");
+        card.className =
+          "target-card" + (collapsed ? " collapsed" : "") + (current ? " labeled" : "");
+        card.dataset.key = key;
+        intentState.cardByKey[key] = card;
+
+        const repo = repoLink(target.repo || "(no repo)", "repo");
+        const commit = target.commit ? escapeHTML(target.commit) : "";
+        const path = escapeHTML(target.path || "");
+        const lines = escapeHTML(genLineLabel(target));
+        const typeChip = target.type
+          ? `<span class="gchip ${escapeHTML(target.type)}">${escapeHTML(target.type)}</span>`
+          : "";
+        const intentChip = current
+          ? `<span class="intent-chip ${current}">${current}</span>`
+          : "";
+        const anchor = target.anchor
+          ? `<span class="anchor-pill" title="${escapeHTML(target.anchor)}">${escapeHTML(target.anchor)}</span>`
+          : "";
+
+        const header = document.createElement("div");
+        header.className = "card-header";
+        header.innerHTML = `
+          ${iconSvg("chevron-down", "card-toggle")}
+          <div class="ch-main">
+            <div class="ch-top">
+              ${repo}
+              <span class="path" title="${path}">${path}</span>
+              <span class="ch-chips">${typeChip}${intentChip}</span>
+            </div>
+            <div class="ch-meta">
+              ${commit ? `<span class="commit">@${commit}</span>` : ""}
+              ${lines ? `<span class="lines">${lines}</span>` : ""}
+              ${anchor}
+            </div>
+          </div>
+        `;
+        header.addEventListener("click", (event) => {
+          if (event.target.closest("a")) return;
+          const nowCollapsed = card.classList.toggle("collapsed");
+          if (nowCollapsed) intentState.expanded.delete(key);
+          else intentState.expanded.add(key);
+        });
+        card.appendChild(header);
+
+        const body = document.createElement("div");
+        body.className = "card-body";
+        card.appendChild(body);
+
+        const commentLabel = document.createElement("div");
+        commentLabel.className = "section-label";
+        commentLabel.innerHTML = `<span class="dot human"></span> Comment`;
+        body.appendChild(commentLabel);
+        body.appendChild(genCommentBlock("human", "Human", target.comment, null));
+
+        const codeLabel = document.createElement("div");
+        codeLabel.className = "section-label";
+        codeLabel.textContent = "Scope";
+        body.appendChild(codeLabel);
+        const codeWrap = document.createElement("div");
+        codeWrap.className = "prompt-wrap";
+        renderCode(codeWrap, target.scope_code, [
+          { start_line: target.comment_start, end_line: target.comment_end },
+        ]);
+        body.appendChild(codeWrap);
+
+        const intentLabel = document.createElement("div");
+        intentLabel.className = "section-label";
+        intentLabel.textContent = "Intent";
+        body.appendChild(intentLabel);
+        body.appendChild(buildIntentControl(key));
+
+        return card;
+      }
+
+      function buildIntentControl(key) {
+        const wrap = document.createElement("div");
+        wrap.className = "intent-control";
+        for (const label of INTENT_LABELS) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "intent-btn " + label;
+          button.textContent = label;
+          button.title = INTENT_TITLES[label];
+          button.dataset.label = label;
+          if (intentState.entries[key] === label) button.classList.add("active");
+          button.addEventListener("click", () => setIntent(key, label));
+          wrap.appendChild(button);
+        }
+        return wrap;
+      }
+
+      // Pick a label, or clear it by re-clicking the active one. The card stays
+      // expanded; only its completeness (the `labeled` state) and chips change.
+      function setIntent(key, label) {
+        const current = intentState.entries[key] || null;
+        const next = current === label ? null : label;
+        intentState.entries[key] = next; // keep the key (null) so Save clears it
+
+        const card = intentState.cardByKey[key];
+        if (card) {
+          for (const button of card.querySelectorAll(".intent-btn")) {
+            button.classList.toggle("active", button.dataset.label === next);
+          }
+          card.classList.toggle("labeled", !!next);
+          updateCardIntentChip(card, next);
+        }
+        const block = intentState.blockByKey[key];
+        if (block) block.classList.toggle("labeled", !!next);
+
+        intentMarkDirty();
+        updateIntentCount();
+        renderIntentSummary();
+      }
+
+      function updateCardIntentChip(card, intent) {
+        const chips = card.querySelector(".ch-chips");
+        if (!chips) return;
+        let chip = chips.querySelector(".intent-chip");
+        if (!intent) {
+          if (chip) chip.remove();
+          return;
+        }
+        if (!chip) {
+          chip = document.createElement("span");
+          chips.appendChild(chip);
+        }
+        chip.className = "intent-chip " + intent;
+        chip.textContent = intent;
+      }
+
+      function renderIntentSummary() {
+        const root = document.getElementById("intent-summary");
+        if (!intentState.data || !intentState.data.targets.length) {
+          root.innerHTML = "";
+          return;
+        }
+        const counts = { why: 0, what: 0, how: 0, unlabeled: 0 };
+        for (const target of intentState.data.targets) {
+          const value = intentState.entries[target.key];
+          if (value === "why" || value === "what" || value === "how") counts[value] += 1;
+          else counts.unlabeled += 1;
+        }
+        const total = intentState.data.targets.length;
+        const stats = INTENT_LABELS.map(
+          (label) =>
+            `<span class="intent-stat ${label}">` +
+            `<span class="intent-chip ${label}">${label}</span> ${counts[label]}</span>`,
+        ).join("");
+        root.innerHTML = `
+          <div class="intent-summary">
+            ${stats}
+            <span class="intent-stat unlabeled">unlabeled ${counts.unlabeled}</span>
+            <span class="intent-stat total">${total} total</span>
+          </div>
+        `;
+      }
+
+      function updateIntentCount() {
+        const targets = intentState.data ? intentState.data.targets : [];
+        let labeled = 0;
+        for (const target of targets) {
+          if (intentState.entries[target.key]) labeled += 1;
+        }
+        document.getElementById("intent-review-count").textContent =
+          `${labeled}/${targets.length} labeled`;
+      }
+
+      function intentMarkDirty() {
+        intentState.dirty = true;
+        updateIntentSave();
+      }
+
+      function updateIntentSave() {
+        const button = document.getElementById("intent-save");
+        button.classList.toggle("dirty", intentState.dirty);
+        button.classList.toggle("clean", !intentState.dirty);
+        button.textContent = intentState.dirty ? "Save" : "Saved";
+      }
+
+      async function saveIntents() {
+        if (!intentState.loaded) return;
+        const button = document.getElementById("intent-save");
+        button.disabled = true;
+        try {
+          const response = await fetch("/intents", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ entries: intentState.entries }),
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          intentState.dirty = false;
+          updateIntentSave();
+        } catch (error) {
+          alert("Save failed: " + error.message);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      function buildIntentProgress(targets, cards) {
+        const rail = document.getElementById("intent-progress");
+        rail.innerHTML = "";
+        intentState.cardEls = cards;
+        intentState.blockEls = [];
+        intentState.blockByKey = {};
+        if (cards.length <= 1) {
+          rail.style.display = "none";
+          return;
+        }
+        rail.style.display = "flex";
+        targets.forEach((target, index) => {
+          const block = document.createElement("button");
+          block.type = "button";
+          block.className = "pblock";
+          if (intentState.entries[target.key]) block.classList.add("labeled");
+          block.title =
+            (target.repo || "") + (target.path ? " · " + target.path : "");
+          block.addEventListener("click", () => {
+            cards[index].scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+          rail.appendChild(block);
+          intentState.blockEls.push(block);
+          intentState.blockByKey[target.key] = block;
+        });
+        updateIntentProgress();
+      }
+
+      function updateIntentProgress() {
+        if (!intentState.blockEls || !intentState.blockEls.length) return;
+        const view = document.getElementById("intent-view");
+        const marker = view.getBoundingClientRect().top + 120;
+        let current = 0;
+        for (let i = 0; i < intentState.cardEls.length; i++) {
+          if (intentState.cardEls[i].getBoundingClientRect().top <= marker) current = i;
+          else break;
+        }
+        if (view.scrollTop + view.clientHeight >= view.scrollHeight - 2) {
+          current = intentState.cardEls.length - 1;
+        }
+        intentState.blockEls.forEach((block, i) =>
+          block.classList.toggle("active", i === current),
+        );
+        const rail = document.getElementById("intent-progress");
+        const block = intentState.blockEls[current];
+        if (rail.scrollHeight > rail.clientHeight) {
+          const top = block.offsetTop;
+          const bottom = top + block.offsetHeight;
+          if (top < rail.scrollTop) rail.scrollTop = top - 4;
+          else if (bottom > rail.scrollTop + rail.clientHeight)
+            rail.scrollTop = bottom - rail.clientHeight + 4;
+        }
+      }
+
+      let intentProgressRaf = null;
+      document.getElementById("intent-view").addEventListener("scroll", () => {
+        if (intentProgressRaf) return;
+        intentProgressRaf = requestAnimationFrame(() => {
+          intentProgressRaf = null;
+          updateIntentProgress();
+        });
+      });
+
+      let intentSearchTimer = null;
+      document.getElementById("intent-search").addEventListener("input", (event) => {
+        intentState.query = event.target.value;
+        clearTimeout(intentSearchTimer);
+        intentSearchTimer = setTimeout(renderIntents, 150);
+      });
+      document.getElementById("intent-save").addEventListener("click", saveIntents);
 
       loadMeta();
     </script>

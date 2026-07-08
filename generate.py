@@ -11,6 +11,11 @@ from llms import openrouter, transformers
 from storage import append_to_jsonl, iter_from_jsonl, save_to_jsonl
 from comments import extract_comments, is_machine_directive_comment
 from prompt import build_prompt
+from scopes import (
+    enclosing_scope_name as _enclosing_scope_name,
+    local_scope_bounds as _local_scope_bounds,
+    scope_code as _scope_code,
+)
 import generations
 
 
@@ -52,66 +57,6 @@ def get_model_profile() -> ModelProfile:
             f"Expected one of: {', '.join(sorted(MODEL_PROFILES))}"
         )
     return MODEL_PROFILES[profile]
-
-
-def _ast_nodes(source: str) -> list[tuple[ast.AST, str]]:
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return []
-    nodes: list[tuple[ast.AST, str]] = []
-
-    def visit(node: ast.AST, prefix: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                qualified_name = prefix + child.name
-                nodes.append((child, qualified_name))
-                visit(child, qualified_name + ".")
-            else:
-                visit(child, prefix)
-
-    visit(tree, "")
-    return nodes
-
-
-def _node_line_span(node: ast.AST) -> tuple[int, int]:
-    start = node.lineno
-    # Include decorator lines in the span, if any
-    for decorator in getattr(node, "decorator_list", []):
-        start = min(start, decorator.lineno)
-    return start, node.end_lineno or node.lineno
-
-
-def _enclosing_scope_name(source: str, line: int) -> str | None:
-    enclosing_scopes = []  # List of scopes enclosing the given line, ordered by span length
-    for node, qualified_name in _ast_nodes(source):
-        start, end = _node_line_span(node)
-        line_is_within_span = start <= line <= end
-        if line_is_within_span:
-            span_length = end - start
-            enclosing_scopes.append((span_length, qualified_name))
-    if not enclosing_scopes:
-        return None
-    _, innermost_name = min(enclosing_scopes, key=lambda scope: scope[0])
-    return innermost_name
-
-
-def _local_scope_bounds(
-    source_lines: list[str], source_code: str, qualified_name: str
-) -> tuple[int, int] | None:
-    for node, name in _ast_nodes(source_code):
-        if name != qualified_name:
-            continue
-
-        # _node_line_span already extends the start up to cover decorators.
-        start, end = _node_line_span(node)
-
-        # Pull in any block comment lines sitting directly above the scope.
-        while start > 1 and source_lines[start - 2].strip().startswith("#"):
-            start -= 1
-
-        return start, end
-    return None
 
 
 def _diff_region_bounds(
@@ -295,47 +240,6 @@ def _scope_diff(diff: str, source_code: str, comment_data: dict) -> str | None:
     return header + "".join(body)
 
 
-def _scope_code(source_code: str, comment_data: dict) -> str:
-    """Return the source of the local scope (function, method, or class)
-    enclosing the target comment, with the target comment itself removed. A
-    block target is dropped entirely; an inline target keeps its code and loses
-    only the trailing comment. When the comment lives at module level, fall back
-    to the whole module, capped at MAX_LINE_COUNT lines."""
-    MAX_LINE_COUNT = 500
-    source_lines = source_code.splitlines()
-
-    qualified_name = _enclosing_scope_name(source_code, comment_data["start_line"])
-    scope_bounds = (
-        _local_scope_bounds(source_lines, source_code, qualified_name)
-        if qualified_name is not None
-        else None
-    )
-    if scope_bounds is not None:
-        start, end = scope_bounds
-    else:
-        start, end = 1, min(len(source_lines), MAX_LINE_COUNT)
-
-    target_start = comment_data["start_line"]
-    target_end = comment_data["end_line"]
-
-    output_lines: list[str] = []
-    for line_no in range(start, end + 1):
-        line = source_lines[line_no - 1]
-        line_is_target = target_start <= line_no <= target_end
-        if not line_is_target:
-            output_lines.append(line)
-            continue
-        if comment_data["type"] == "inline":
-            # Keep the code the inline comment sat on, dropping the comment.
-            anchor = comment_data.get("anchor")
-            code = anchor if anchor is not None else line.split("#", 1)[0].rstrip()
-            if code:
-                output_lines.append(code)
-        # A block target is wholly comment, so its lines vanish entirely.
-
-    return "\n".join(output_lines)
-
-
 def _reverted_comment_text(target: dict, old_comments: list[dict]) -> str | None:
     for old_comment in old_comments:
         if (
@@ -512,6 +416,7 @@ def _comment_generation(
     diff = file_data["diff"]
     previous_source_code = file_data["previous_source_code"]
     filepath = file_data["new_path"]
+    intent = comment_data["intent"]
 
     if comment_data["status"] == "modified":
         previous_comments = extract_comments(
@@ -524,6 +429,7 @@ def _comment_generation(
             filepath,
             comment_data,
             status="modified",
+            intent=intent,
             diff_hunk=diff_hunk,
             unmodified_comment=unmodified_comment,
         )
@@ -535,6 +441,7 @@ def _comment_generation(
             filepath,
             comment_data,
             status="added",
+            intent=intent,
             scope_code=scope_code,
         )
 
@@ -563,6 +470,7 @@ def _target_comments(source_file: dict) -> list[dict]:
         and comment.get("status") in TARGET_COMMENT_STATUSES
         and comment.get("comment") is not None
         and not is_machine_directive_comment(comment["comment"])
+        and comment.get("intent") is not None
     ]
 
 
