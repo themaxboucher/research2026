@@ -1277,6 +1277,25 @@
         font-weight: 600;
         color: var(--text);
       }
+      /* Scope code: a bordered, rounded box with a clean line-number gutter,
+         matching the comment block above it. The surface is --bg so it lines up
+         with the syntax-highlighter's own background; the per-line content spans
+         are made transparent so blank lines don't show through as dark bars. */
+      #intent-view .intent-code {
+        background: var(--bg);
+        border: 1px solid var(--border-muted);
+        border-radius: 8px;
+        overflow: auto;
+      }
+      #intent-view .intent-code .code-wrap {
+        padding: 6px 0;
+      }
+      #intent-view .intent-code .code-line .content {
+        padding-right: 16px;
+      }
+      #intent-view .intent-code .code-line .content.hljs {
+        background: transparent;
+      }
       .gen-view .note-input {
         width: 100%;
         margin-top: 8px;
@@ -4042,7 +4061,10 @@
         commentLabel.className = "section-label";
         commentLabel.innerHTML = `<span class="dot human"></span> Comment`;
         body.appendChild(commentLabel);
-        body.appendChild(genCommentBlock("human", "Human", target.comment, null));
+        const commentWrap = document.createElement("div");
+        commentWrap.className = "prompt-wrap";
+        commentWrap.appendChild(genCommentBlock("human", "Human", target.comment, null));
+        body.appendChild(commentWrap);
 
         const codeLabel = document.createElement("div");
         codeLabel.className = "section-label";
@@ -4050,16 +4072,22 @@
         body.appendChild(codeLabel);
         const codeWrap = document.createElement("div");
         codeWrap.className = "prompt-wrap";
-        renderCode(codeWrap, target.scope_code, [
+        const codeBox = document.createElement("div");
+        codeBox.className = "intent-code";
+        renderCode(codeBox, target.scope_code, [
           { start_line: target.comment_start, end_line: target.comment_end },
         ]);
+        codeWrap.appendChild(codeBox);
         body.appendChild(codeWrap);
 
         const intentLabel = document.createElement("div");
         intentLabel.className = "section-label";
         intentLabel.textContent = "Intent";
         body.appendChild(intentLabel);
-        body.appendChild(buildIntentControl(key));
+        const controlWrap = document.createElement("div");
+        controlWrap.className = "prompt-wrap";
+        controlWrap.appendChild(buildIntentControl(key));
+        body.appendChild(controlWrap);
 
         return card;
       }
