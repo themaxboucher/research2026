@@ -1212,6 +1212,11 @@
         color: #b98ce8;
         border-color: rgba(160, 110, 224, 0.4);
       }
+      .intent-chip.other {
+        background: rgba(139, 148, 158, 0.18);
+        color: #adbac7;
+        border-color: rgba(139, 148, 158, 0.4);
+      }
       .gen-view .target-card.labeled {
         border-color: rgba(76, 155, 232, 0.4);
       }
@@ -1256,6 +1261,11 @@
         background: rgba(160, 110, 224, 0.2);
         color: #b98ce8;
         border-color: #a06ee0;
+      }
+      .intent-btn.other.active {
+        background: rgba(139, 148, 158, 0.18);
+        color: #adbac7;
+        border-color: #8b949e;
       }
       .intent-summary {
         display: flex;
@@ -3929,11 +3939,12 @@
       // target comment is shown in the scope it lives in and labeled Why / What
       // / How. Labels are held in memory and flushed to repo_files_sample.jsonl
       // by the Save button.
-      const INTENT_LABELS = ["why", "what", "how"];
+      const INTENT_LABELS = ["why", "what", "how", "other"];
       const INTENT_TITLES = {
         why: "Why the code is written this way (rationale)",
         what: "What the code does (summary)",
         how: "How the code works (mechanism)",
+        other: "None of the above",
       };
       const intentState = {
         loaded: false,
@@ -4154,10 +4165,11 @@
           root.innerHTML = "";
           return;
         }
-        const counts = { why: 0, what: 0, how: 0, unlabeled: 0 };
+        const counts = { unlabeled: 0 };
+        for (const label of INTENT_LABELS) counts[label] = 0;
         for (const target of intentState.data.targets) {
           const value = intentState.entries[target.key];
-          if (value === "why" || value === "what" || value === "how") counts[value] += 1;
+          if (INTENT_LABELS.includes(value)) counts[value] += 1;
           else counts.unlabeled += 1;
         }
         const total = intentState.data.targets.length;

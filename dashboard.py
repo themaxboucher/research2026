@@ -28,8 +28,9 @@ DEFAULT_PAGE_LIMIT = 200
 MAX_PAGE_LIMIT = 1000
 
 # The intent labels a human comment can carry (why the code is as it is, what
-# the code does, or how it works). Stored on the comment in the source dataset.
-INTENT_VALUES = ("why", "what", "how")
+# the code does, how it works, or something else). Stored on the comment in the
+# source dataset.
+INTENT_VALUES = ("why", "what", "how", "other")
 
 # Bump when the cached index schema changes so stale caches are rebuilt.
 INDEX_VERSION = 6
