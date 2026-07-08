@@ -463,6 +463,7 @@ def _comment_generation(
 def _target_comments(source_file: dict) -> list[dict]:
     TARGET_COMMENT_TYPES = {"inline", "block"}
     TARGET_COMMENT_STATUSES = {"added"}
+    TARGET_INTENTS = {"what", "why", "how"}
     return [
         comment
         for comment in (source_file.get("comments") or [])
@@ -470,7 +471,7 @@ def _target_comments(source_file: dict) -> list[dict]:
         and comment.get("status") in TARGET_COMMENT_STATUSES
         and comment.get("comment") is not None
         and not is_machine_directive_comment(comment["comment"])
-        and comment.get("intent") is not None
+        and comment.get("intent") in TARGET_INTENTS
     ]
 
 
