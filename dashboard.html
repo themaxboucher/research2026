@@ -3514,6 +3514,15 @@
       // comment + each model's generation — nothing else (no notes, review
       // state or scoring). Comment text is fenced so its leading `#` lines
       // don't render as markdown headings when pasted.
+      // Fisher-Yates shuffle, in place. Returns the same array for convenience.
+      function shuffle(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+      }
+
       function genClipboardText(target) {
         const fence = (text) => "```text\n" + (text || "") + "\n```";
         const lines = ["# Code comment generation", ""];
@@ -3530,14 +3539,18 @@
         lines.push("", "## Prompt given to each model", "", target.prompt || "(no prompt)");
         lines.push("", "## The developer's actual comment", "", fence(target.human || "(none)"));
         lines.push("", "## Model-generated comments");
-        for (const result of target.results || []) {
-          lines.push("", `### ${result.model || "(model)"}`, "");
+        // Shuffle the generations and anonymize model names (Model A, Model B, …)
+        // so whoever reads the copied text can't tell which model wrote what.
+        const shuffled = shuffle([...(target.results || [])]);
+        shuffled.forEach((result, index) => {
+          const label = `Model ${String.fromCharCode(65 + index)}`;
+          lines.push("", `### ${label}`, "");
           lines.push(
             result.error
               ? fence(`generation error: ${result.error}`)
               : fence(result.comment || "(empty)"),
           );
-        }
+        });
         return lines.join("\n") + "\n";
       }
 
