@@ -497,6 +497,60 @@ def generate_comments_for_file(file_data: dict, model_profile: ModelProfile) -> 
     file_data["comment_generations"] = comment_generations
 
 
+def _is_ai_authored_file(source_file: dict) -> bool:
+    AI_AUTHORED_IDENTIFIERS = {
+        # Anthropic — Claude Code
+        "Co-authored-by: Claude",
+        "noreply@anthropic.com",
+        "Generated with Claude Code",
+
+        # GitHub Copilot — coding agent / Copilot CLI
+        "Co-authored-by: Copilot",
+        "Copilot@users.noreply.github.com",  # e.g. 198982749+Copilot@users.noreply.github.com
+        "Copilot[bot]@users.noreply.github.com",
+
+        # Cursor — background/cloud agent
+        "Co-authored-by: Cursor",
+        "cursoragent@cursor.com",
+        "cursoragent@users.noreply.github.com",
+        "Made-with: Cursor",
+
+        # OpenAI — Codex CLI / Codex cloud
+        "Co-authored-by: Codex",
+        "noreply@openai.com",
+        "chatgpt-codex-connector[bot]",
+
+        # Google — Gemini CLI / Gemini Code Assist
+        "Co-authored-by: Gemini",
+        "gemini-code-assist[bot]",
+        "gemini-cli@users.noreply.github.com",
+        "gemini-cli-agent@google.com",
+
+        # Aider
+        "Co-authored-by: aider",
+        "noreply@aider.chat",
+        "aider@aider.chat",
+
+        # Cognition — Devin
+        "Co-authored-by: Devin",
+        "devin-ai-integration",  # also covers the devin-ai-integration[bot] account
+
+        # Generic / cross-tool markers
+        "🤖 Generated with",
+        "Assisted-by:",
+        "Co-authored-by: AI",
+    }
+    if source_file.get("commit_message") is None:
+        raise ValueError(
+            "Commit message is required to determine if a file is AI-authored"
+        )
+    commit_message = source_file.get("commit_message").lower()
+    for identifier in AI_AUTHORED_IDENTIFIERS:
+        if identifier.lower() in commit_message:
+            return True
+    return False
+
+
 def _is_eligible_file(source_file: dict) -> bool:
     ELIGIBLE_CHANGE_TYPES = {"MODIFY"}
     is_valid_change_type = source_file.get("change_type") in ELIGIBLE_CHANGE_TYPES
@@ -509,6 +563,14 @@ def _is_eligible_file(source_file: dict) -> bool:
 
     has_target_comments = bool(_target_comments(source_file))
     if not has_target_comments:
+        return False
+
+    has_commit_message = source_file.get("commit_message") is not None
+    if not has_commit_message:
+        return False
+
+    is_ai_authored = _is_ai_authored_file(source_file)
+    if is_ai_authored:
         return False
 
     return True
