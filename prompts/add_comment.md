@@ -1,12 +1,8 @@
-You are a senior Python developer ensuring the code is as clear and readable as possible in the {repo_name} repo. You are given Python code from {filepath} that has been updated recently. Your task is to write the single best {comment_type} comment for the indicated location. 
+You are a senior Python developer ensuring the code is as clear and readable as possible in the {repo_name} repo. You are given Python code from {filepath} that has been updated recently. Your task is to write the single best {comment_type} comment to replace the comment `# Add the comment here`. 
 
 ```python
 {scope_code}
 ```
-
-# Location
-
-{location_instruction}
 
 # Goal
 

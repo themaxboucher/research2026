@@ -1,14 +1,14 @@
 You are a senior Python developer keeping code comments relevant, accurate, useful, clear and concise.
 
-A developer changed the Python code below in a commit, shown as a diff for the file at {filepath}. The comments have NOT been updated yet. Your task is to write the single most useful {comment_type} comment for the indicated location. Don't just summarize the code. The comment should tell a developer something useful that isn't already obvious from the code itself.
+A developer changed the Python code below in a commit, shown as a diff for the file at {filepath}. The comments have NOT been updated yet. Your task is to edit or add to the following comment:
+
+```python
+{unmodified_comment}
+```
 
 <change>
 {diff_hunk}
 </change>
-
-# Location
-
-{location_instruction}
 
 # Rules
 

@@ -79,9 +79,13 @@ def _scope_bounds(source_code: str, source_lines: list[str], anchor_line: int) -
 
 def scope_code(source_code: str, comment_data: dict) -> str:
     """Return the source of the local scope enclosing the target comment, with
-    the target comment itself removed. A block target is dropped entirely; an
-    inline target keeps its code and loses only the trailing comment. When the
-    comment lives at module level, fall back to the whole module (capped)."""
+    the target comment itself replaced by a placeholder. A block target
+    collapses to a single placeholder comment line; an inline target keeps its
+    code and gets a placeholder trailing comment. When the comment lives at
+    module level, fall back to the whole module (capped)."""
+    
+    PLACEHOLDER_COMMENT = "Add the comment here"
+
     source_lines = source_code.splitlines()
     start, end = _scope_bounds(source_code, source_lines, comment_data["start_line"])
 
@@ -96,11 +100,16 @@ def scope_code(source_code: str, comment_data: dict) -> str:
             output_lines.append(line)
             continue
         if comment_data["type"] == "inline":
-            # Keep the code the inline comment sat on, dropping the comment.
+            # Keep the code the inline comment sat on, swapping the comment
+            # for the placeholder.
             anchor = comment_data.get("anchor")
             code = anchor if anchor is not None else line.split("#", 1)[0].rstrip()
             if code:
-                output_lines.append(code)
-        # A block target is wholly comment, so its lines vanish entirely.
+                output_lines.append(f"{code}  # {PLACEHOLDER_COMMENT}")
+        elif line_no == target_start:
+            # Collapse the block target to one placeholder line, keeping the
+            # original indentation.
+            indent = line[: len(line) - len(line.lstrip())]
+            output_lines.append(f"{indent}# {PLACEHOLDER_COMMENT}")
 
     return "\n".join(output_lines)

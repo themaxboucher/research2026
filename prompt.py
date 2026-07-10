@@ -12,37 +12,6 @@ INTENT_INSTRUCTION_PATHS = {
 }
 
 
-def _location_instruction(
-    comment_data: dict, unmodified_comment: str | None = None
-) -> str:
-    anchor = comment_data.get("anchor") or "(the anchored code)"
-    is_comment_edit = comment_data["status"] == "modified"
-    is_inline_comment = comment_data["type"] == "inline"
-
-    if is_comment_edit and unmodified_comment is None:
-        raise ValueError("Unmodified comment is required for modified comments")
-
-    if is_inline_comment and is_comment_edit:
-        return (
-            "Update the inline comment on this line of code:\n"
-            f"```python\n{anchor}\n```\n"
-            f"Current (outdated) comment:\n```python\n{unmodified_comment}\n```"
-        )
-
-    if is_inline_comment:
-        return f"Write a new inline comment for this line of code:\n```python\n{anchor}\n```"
-
-    if is_comment_edit:
-        return (
-            "Update the block comment directly above this line of code:\n"
-            f"```python\n{anchor}\n```\n"
-            "Current (outdated) comment:\n"
-            f"```python\n{unmodified_comment}\n```"
-        )
-
-    return f"Write a new block comment directly above this line of code:\n```python\n{anchor}\n```"
-
-
 def _code_type_instruction(comment_data: dict) -> str:
     if comment_data["type"] == "inline":
         return "Output a single comment line beginning with `#`"
@@ -67,8 +36,8 @@ def _build_modify_prompt(
         .replace("{comment_type}", comment_data["type"])
         .replace("{diff_hunk}", diff_hunk)
         .replace(
-            "{location_instruction}",
-            _location_instruction(comment_data, unmodified_comment),
+            "{unmodified_comment}",
+            unmodified_comment,
         )
     )
 
@@ -83,10 +52,6 @@ def _build_add_prompt(
         .replace("{comment_type}", comment_data["type"])
         .replace("{scope_code}", scope_code)
         .replace("{intent_instruction}", _intent_instruction(intent))
-        .replace(
-            "{location_instruction}",
-            _location_instruction(comment_data),
-        )
         .replace("{code_type_instruction}", _code_type_instruction(comment_data))
     )
 
