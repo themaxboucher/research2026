@@ -423,7 +423,8 @@ def _trim_target(record: dict, generation: dict, intent_map: dict[str, str]) -> 
         )
 
     repo = record.get("repo_name") or ""
-    commit = (record.get("commit_hash") or "")[:7]
+    commit_full = record.get("commit_hash") or ""
+    commit = commit_full[:7]
     path = record.get("new_path") or record.get("filename") or ""
     # Stable identity for attaching review notes and intent, robust to reordering.
     key = _comment_key(record, generation)
@@ -432,6 +433,7 @@ def _trim_target(record: dict, generation: dict, intent_map: dict[str, str]) -> 
         "key": key,
         "repo": repo,
         "commit": commit,
+        "commit_full": commit_full,
         "path": path,
         "type": generation.get("type") or "",
         "status": generation.get("status") or "",
@@ -533,6 +535,7 @@ def _build_intents_payload(source_path: Path) -> dict:
                     "key": _comment_key(record, comment),
                     "repo": record.get("repo_name") or "",
                     "commit": (record.get("commit_hash") or "")[:7],
+                    "commit_full": record.get("commit_hash") or "",
                     "path": record.get("new_path") or record.get("filename") or "",
                     "type": comment.get("type") or "",
                     "status": comment.get("status") or "",
