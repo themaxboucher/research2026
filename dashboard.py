@@ -749,6 +749,11 @@ def _make_handler(
                 if state is not None and "gen_offset" in entry:
                     record = _read_record(state["generated_path"], entry["gen_offset"])
                     _attach_generation_diffs(record)
+                    if record.get("commit_message") is None:
+                        # Generation files predate commit-message enrichment;
+                        # the source sample record carries the field.
+                        source_record = _read_record(source_path, entry["offset"])
+                        record["commit_message"] = source_record.get("commit_message")
                 else:
                     record = _read_record(source_path, entry["offset"])
                 _stamp_record_intents(record, intent_map)

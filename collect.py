@@ -143,6 +143,7 @@ def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
                 {
                     "repo_name": repo_full_name,
                     "commit_hash": commit.hash,
+                    "commit_message": commit.msg,
                     "filename": file.filename,
                     "new_path": file.new_path,
                     "change_type": file.change_type.name,

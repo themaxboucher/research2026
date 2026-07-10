@@ -189,6 +189,12 @@ def _github_get(url: str, **kwargs) -> requests.Response:
     )
 
 
+def get_commit_message(repo_full_name: str, commit_hash: str) -> str:
+    url = f"https://api.github.com/repos/{repo_full_name}/commits/{commit_hash}"
+    response = _github_get(url)
+    return response.json()["commit"]["message"]
+
+
 def _build_search_query(
     language: str,
     min_stars: int,

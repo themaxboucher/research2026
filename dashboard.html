@@ -1940,6 +1940,7 @@
         { id: "cur", label: "Current" },
         { id: "prev", label: "Previous" },
         { id: "comments", label: "Comments" },
+        { id: "message", label: "Message" },
         { id: "raw", label: "Raw JSON" },
       ];
 
@@ -2403,6 +2404,8 @@
             return renderCode(panel, r.previous_source_code, []);
           case "comments":
             return renderComments(panel, r.comments || [], { kind: "record" });
+          case "message":
+            return renderCommitMessage(panel, r);
           case "raw":
             return renderRaw(panel, r);
         }
@@ -2787,6 +2790,22 @@
             hunkMode: "model",
           });
         }
+      }
+
+      function renderCommitMessage(panel, record) {
+        if (!record.commit_message) {
+          panel.innerHTML = `<div class="empty-state">No commit message available.</div>`;
+          return;
+        }
+        const pre = document.createElement("pre");
+        pre.style.margin = "0";
+        pre.style.padding = "20px 24px";
+        pre.style.fontSize = "13px";
+        pre.style.lineHeight = "1.6";
+        pre.style.whiteSpace = "pre-wrap";
+        pre.style.wordBreak = "break-word";
+        pre.textContent = record.commit_message;
+        panel.appendChild(pre);
       }
 
       function renderRaw(panel, record) {
