@@ -1,14 +1,22 @@
 You are a senior Python developer keeping code comments relevant, accurate, useful, clear and concise.
 
-A developer changed the Python code below in a commit, shown as a diff for the file at {filepath}. The comments have NOT been updated yet. Your task is to edit or add to the following comment:
+A developer changed the Python code below in a commit, shown as a diff for the file at {filepath}. Here is the commit message:
 
-```python
-{unmodified_comment}
+```text
+{commit_message}
 ```
 
 <change>
 {diff_hunk}
 </change>
+
+The following comment has NOT been updated yet:
+
+```python
+{unmodified_comment}
+```
+
+Your task is to edit and/or add to this comment to ensure it stays accurate and relevant to the changes.
 
 # Rules
 

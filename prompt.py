@@ -26,6 +26,7 @@ def _build_modify_prompt(
     repo_name: str,
     filepath: str,
     comment_data: dict,
+    commit_message: str,
     diff_hunk: str,
     unmodified_comment: str,
 ) -> str:
@@ -34,6 +35,7 @@ def _build_modify_prompt(
         template.replace("{repo_name}", repo_name)
         .replace("{filepath}", filepath)
         .replace("{comment_type}", comment_data["type"])
+        .replace("{commit_message}", commit_message)
         .replace("{diff_hunk}", diff_hunk)
         .replace(
             "{unmodified_comment}",
@@ -43,13 +45,19 @@ def _build_modify_prompt(
 
 
 def _build_add_prompt(
-    repo_name: str, filepath: str, comment_data: dict, intent: str, scope_code: str
+    repo_name: str,
+    filepath: str,
+    comment_data: dict,
+    commit_message: str,
+    intent: str,
+    scope_code: str,
 ) -> str:
     template = STATUS_TEMPLATE_PATHS["added"].read_text(encoding="utf-8")
     return (
         template.replace("{repo_name}", repo_name)
         .replace("{filepath}", filepath)
         .replace("{comment_type}", comment_data["type"])
+        .replace("{commit_message}", commit_message)
         .replace("{scope_code}", scope_code)
         .replace("{intent_instruction}", _intent_instruction(intent))
         .replace("{code_type_instruction}", _code_type_instruction(comment_data))
@@ -62,6 +70,7 @@ def build_prompt(
     comment_data: dict,
     status: str,
     intent: str,
+    commit_message: str,
     scope_code: str | None = None,
     diff_hunk: str | None = None,
     unmodified_comment: str | None = None,
@@ -72,10 +81,17 @@ def build_prompt(
         if unmodified_comment is None:
             raise ValueError("Unmodified comment is required for modified comments")
         return _build_modify_prompt(
-            repo_name, filepath, comment_data, diff_hunk, unmodified_comment
+            repo_name,
+            filepath,
+            comment_data,
+            commit_message,
+            diff_hunk,
+            unmodified_comment,
         )
 
     if scope_code is None:
         raise ValueError("Scope code is required for added comments")
 
-    return _build_add_prompt(repo_name, filepath, comment_data, intent, scope_code)
+    return _build_add_prompt(
+        repo_name, filepath, comment_data, commit_message, intent, scope_code
+    )
