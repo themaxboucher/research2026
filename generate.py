@@ -35,6 +35,7 @@ MODEL_PROFILES = {
             "qwen/qwen-2.5-7b-instruct",
             "deepseek/deepseek-v4-pro",
             "z-ai/glm-5.2",
+            "openai/gpt-5.6-luna-pro",
         ],
         get_completion=openrouter.get_completion,
     ),
