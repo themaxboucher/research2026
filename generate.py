@@ -466,7 +466,8 @@ def _comment_generation(
 def _target_comments(source_file: dict) -> list[dict]:
     TARGET_COMMENT_TYPES = {"inline", "block"}
     TARGET_COMMENT_STATUSES = {"added"}
-    TARGET_INTENTS = {"what", "why", "how"}
+    # None means the comment was never intent-labeled; it gets the generic instruction
+    TARGET_INTENTS = {"what", "why", "how", None}
     return [
         comment
         for comment in (source_file.get("comments") or [])

@@ -9,6 +9,7 @@ INTENT_INSTRUCTION_PATHS = {
     "what": Path(__file__).parent / "prompts" / "what.md",
     "how": Path(__file__).parent / "prompts" / "how.md",
     "why": Path(__file__).parent / "prompts" / "why.md",
+    "generic": Path(__file__).parent / "prompts" / "generic.md",
 }
 
 
@@ -18,8 +19,9 @@ def _code_type_instruction(comment_data: dict) -> str:
     return "Output one or more comment lines, each beginning with `#`"
 
 
-def _intent_instruction(intent: str) -> str:
-    return INTENT_INSTRUCTION_PATHS[intent].read_text(encoding="utf-8")
+def _intent_instruction(intent: str | None) -> str:
+    # Comments with no intent label fall back to the generic instruction
+    return INTENT_INSTRUCTION_PATHS[intent or "generic"].read_text(encoding="utf-8")
 
 
 def _build_modify_prompt(
@@ -49,7 +51,7 @@ def _build_add_prompt(
     filepath: str,
     comment_data: dict,
     commit_message: str,
-    intent: str,
+    intent: str | None,
     scope_code: str,
 ) -> str:
     template = STATUS_TEMPLATE_PATHS["added"].read_text(encoding="utf-8")
@@ -69,7 +71,7 @@ def build_prompt(
     filepath: str,
     comment_data: dict,
     status: str,
-    intent: str,
+    intent: str | None,
     commit_message: str,
     scope_code: str | None = None,
     diff_hunk: str | None = None,
