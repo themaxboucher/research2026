@@ -1062,6 +1062,31 @@
         background: var(--chip-error);
         color: var(--chip-error-fg);
       }
+      /* Similarity scores (written by eval.py) shown as small chips. */
+      .score-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .gen-view .comment-block .score-chips {
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--border-muted);
+      }
+      .score-chip {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 10.5px;
+        padding: 1px 7px;
+        border-radius: 10px;
+        background: var(--bg-subtle);
+        border: 1px solid var(--border-muted);
+        color: var(--text-muted);
+        white-space: nowrap;
+      }
+      .score-chip b {
+        color: var(--text);
+        font-weight: 600;
+      }
       .gen-view .gen-empty {
         padding: 80px 20px;
         text-align: center;
@@ -2630,8 +2655,16 @@
       // comment; in "model" mode it's the small source→applied diff rendered
       // whole, with the model's inserted comment lines highlighted.
       function appendCommentBlock(panel, opts) {
-        const { path, comment, model, commentText, diffText, hunkTitle, hunkMode } =
-          opts;
+        const {
+          path,
+          comment,
+          model,
+          commentText,
+          diffText,
+          hunkTitle,
+          hunkMode,
+          scores,
+        } = opts;
         const lines =
           comment.start_line === comment.end_line
             ? `L${comment.start_line}`
@@ -2651,6 +2684,7 @@
       <span class="cd-line">${escapeHTML(lines)}</span>
       ${!model && comment.intent ? `<span class="intent-chip ${comment.intent}">${comment.intent}</span>` : ""}
       ${anchorHTML}
+      ${scoreChipsHTML(scores)}
     </div>
     <pre class="cd-comment-text"></pre>
     <div class="cd-hunk-title">${escapeHTML(hunkTitle)}</div>
@@ -2788,6 +2822,7 @@
             diffText: result.diff || "",
             hunkTitle: "Model diff hunk",
             hunkMode: "model",
+            scores: result.scores,
           });
         }
       }
@@ -2911,6 +2946,7 @@
         failureModes: [],
         expanded: new Set(),
         breakdownCollapsed: false,
+        metricsCollapsed: false,
         dirty: false,
         cardByKey: {},
         blockByKey: {},
@@ -3196,19 +3232,42 @@
         }
       }
 
-      function genCommentBlock(kind, label, text, error) {
+      // The three similarity metrics eval.py writes onto a model result, as a
+      // row of chips. Returns HTML; empty when the result was never scored.
+      function scoreChipsHTML(scores) {
+        if (!scores) return "";
+        const chip = (name, value) =>
+          `<span class="score-chip">${name} <b>${
+            value == null ? "–" : value.toFixed(3)
+          }</b></span>`;
+        return (
+          chip("BLEU-4", scores.bleu4) +
+          chip("ROUGE-L", scores.rougeL) +
+          chip("BERTScore", scores.bertscore_f1)
+        );
+      }
+
+      function genCommentBlock(kind, label, text, error, scores) {
         const block = document.createElement("div");
         block.className = "comment-block " + kind + (error ? " error" : "");
         const head = document.createElement("div");
         head.className = "cb-head";
         head.textContent = label;
+        block.appendChild(head);
+        const chipsHTML = scoreChipsHTML(scores);
+        if (chipsHTML) {
+          const chips = document.createElement("div");
+          chips.className = "score-chips";
+          chips.innerHTML = chipsHTML;
+          block.appendChild(chips);
+        }
         const pre = document.createElement("pre");
         if (error) {
           pre.innerHTML = `${iconSvg("alert-triangle")} ${escapeHTML(error)}`;
         } else {
           pre.textContent = text || "(empty)";
         }
-        block.append(head, pre);
+        block.appendChild(pre);
         return block;
       }
 
@@ -3379,7 +3438,13 @@
         grid.appendChild(genCommentBlock("human", "Human", target.human, null));
         for (const result of target.results || []) {
           const model = result.model || "(model)";
-          const block = genCommentBlock("model", model, result.comment, result.error);
+          const block = genCommentBlock(
+            "model",
+            model,
+            result.comment,
+            result.error,
+            result.scores,
+          );
           block.appendChild(buildModelTags(key, model));
           block.appendChild(buildModelNote(key, model, entry));
           grid.appendChild(block);
@@ -3719,11 +3784,110 @@
       // intent — largest group of results first, unlabeled targets pinned
       // last — otherwise it renders the single combined matrix. Errored
       // generations and untagged-but-produced ones get their own rows.
+      // Mean of each eval.py metric per model over every scored result in the
+      // generation. Returns null when no result carries scores (eval.py has
+      // not been run on this generation yet).
+      function buildMetricsCard() {
+        const models = gen.data.models;
+        const METRICS = [
+          ["bleu4", "BLEU-4"],
+          ["rougeL", "ROUGE-L"],
+          ["bertscore_f1", "BERTScore F1"],
+        ];
+        const sums = {};
+        const scored = {};
+        const unusable = {};
+        for (const model of models) {
+          sums[model] = { bleu4: 0, rougeL: 0, bertscore_f1: 0 };
+          scored[model] = 0;
+          unusable[model] = 0;
+        }
+        let anyScores = false;
+        for (const target of gen.data.targets) {
+          for (const result of target.results || []) {
+            if (!(result.model in sums) || result.scores === undefined) continue;
+            anyScores = true;
+            if (result.scores === null) {
+              unusable[result.model] += 1;
+              continue;
+            }
+            scored[result.model] += 1;
+            for (const [key] of METRICS) {
+              sums[result.model][key] += result.scores[key] || 0;
+            }
+          }
+        }
+        if (!anyScores) return null;
+
+        const totalScored = models.reduce((sum, model) => sum + scored[model], 0);
+        const totalUnusable = models.reduce(
+          (sum, model) => sum + unusable[model],
+          0,
+        );
+
+        const card = document.createElement("section");
+        card.className =
+          "breakdown-card" + (gen.metricsCollapsed ? " collapsed" : "");
+        const head = document.createElement("div");
+        head.className = "breakdown-head";
+        head.innerHTML = `
+          ${iconSvg("chevron-down", "breakdown-toggle")}
+          <span class="breakdown-title">Similarity metrics</span>
+          <span class="breakdown-sub">mean over ${totalScored} scored result${
+            totalScored === 1 ? "" : "s"
+          }${totalUnusable ? ` · ${totalUnusable} unusable` : ""}</span>
+        `;
+        head.addEventListener("click", () => {
+          gen.metricsCollapsed = !gen.metricsCollapsed;
+          card.classList.toggle("collapsed", gen.metricsCollapsed);
+        });
+        card.appendChild(head);
+
+        const body = document.createElement("div");
+        body.className = "breakdown-body";
+        card.appendChild(body);
+
+        const mean = (model, key) =>
+          scored[model] ? (sums[model][key] / scored[model]).toFixed(3) : "–";
+        let rowsHtml = "";
+        for (const [key, label] of METRICS) {
+          rowsHtml +=
+            `<tr><td class="bd-row-label">${label}</td>` +
+            models
+              .map((model) => `<td class="bd-count">${mean(model, key)}</td>`)
+              .join("") +
+            `</tr>`;
+        }
+        rowsHtml +=
+          `<tr class="bd-special"><td class="bd-row-label">(scored results)</td>` +
+          models
+            .map(
+              (model) =>
+                `<td class="bd-count${scored[model] === 0 ? " zero" : ""}">${
+                  scored[model]
+                }</td>`,
+            )
+            .join("") +
+          `</tr>`;
+
+        const table = document.createElement("table");
+        table.className = "breakdown-table";
+        table.innerHTML =
+          `<thead><tr><th class="bd-row-label">Metric</th>` +
+          models.map((model) => `<th>${escapeHTML(model)}</th>`).join("") +
+          `</tr></thead><tbody>${rowsHtml}</tbody>`;
+        body.appendChild(table);
+        return card;
+      }
+
       function renderBreakdown() {
         const root = document.getElementById("gen-breakdown");
         root.innerHTML = "";
         if (!gen.data || !gen.data.targets.length) return;
         const models = gen.data.models;
+
+        const metricsCard = buildMetricsCard();
+        if (metricsCard) root.appendChild(metricsCard);
 
         const countGroup = (targets) => {
           const tagCounts = {};

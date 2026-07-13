@@ -399,14 +399,19 @@ def _short_model_name(model: str) -> str:
 
 def _trim_target(record: dict, generation: dict, intent_map: dict[str, str]) -> dict:
     """Pull just the fields needed for the comparison view."""
-    results = [
-        {
+    results = []
+    for result in generation.get("results") or []:
+        trimmed = {
             "model": _short_model_name(result.get("model") or ""),
             "comment": result.get("comment_text") or "",
             "error": result.get("error"),
         }
-        for result in generation.get("results") or []
-    ]
+        # eval.py writes scores onto scored results (null when the prediction
+        # was unusable); leave the key absent when eval.py hasn't run so the
+        # client can tell the two apart.
+        if "scores" in result:
+            trimmed["scores"] = result["scores"]
+        results.append(trimmed)
 
     # Newer generations store the prompt once on the generation; older ones
     # repeated it on each result. Prefer the generation-level prompt, falling
