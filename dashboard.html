@@ -1843,6 +1843,148 @@
       .tag-modal-foot button:hover {
         filter: brightness(1.08);
       }
+
+      /* ===== Regenerate sub-view (scope regenerations) ===== */
+      .gen-mode-toggle {
+        display: inline-flex;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .gen-mode-toggle button {
+        background: var(--bg);
+        border: none;
+        color: var(--text-muted);
+        padding: 5px 14px;
+        font-size: 12.5px;
+        cursor: pointer;
+      }
+      .gen-mode-toggle button + button {
+        border-left: 1px solid var(--border);
+      }
+      .gen-mode-toggle button:hover {
+        color: var(--text);
+      }
+      .gen-mode-toggle button.active {
+        background: var(--accent);
+        color: #fff;
+      }
+      .gen-view .gchip.scope {
+        background: var(--chip-rename);
+        color: var(--chip-rename-fg);
+      }
+      /* One model's regeneration: header strip with hit summary, body with
+         the diff (or the rejection error + collapsible raw response). */
+      .gen-view .regen-result {
+        border: 1px solid var(--border-muted);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 12px;
+        background: var(--bg-subtle);
+      }
+      .gen-view .regen-result-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--model);
+        background: rgba(188, 140, 255, 0.08);
+      }
+      .gen-view .regen-result.error .regen-result-head {
+        color: var(--chip-error-fg);
+        background: var(--chip-error);
+      }
+      .gen-view .regen-result-body {
+        padding: 10px 12px;
+      }
+      .gen-view .regen-result-body .gen-diff {
+        margin: 0;
+      }
+      .gen-view .regen-error-text {
+        margin: 0;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--chip-error-fg);
+      }
+      .gen-view .regen-raw {
+        margin-top: 8px;
+      }
+      .gen-view .regen-raw summary {
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--text-muted);
+        user-select: none;
+      }
+      .gen-view .regen-raw summary:hover {
+        color: var(--text);
+      }
+      .gen-view .regen-raw pre {
+        margin: 8px 0 0;
+        padding: 12px 14px;
+        background: var(--bg-sunken);
+        border: 1px solid var(--border-muted);
+        border-radius: 8px;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--text);
+        max-height: 420px;
+        overflow: auto;
+      }
+      .gen-view .regen-nodiff {
+        font-size: 12.5px;
+        font-style: italic;
+        color: var(--text-muted);
+      }
+      /* Placement chips on a target's extracted comment. */
+      .regen-chip {
+        font-size: 10.5px;
+        font-weight: 600;
+        padding: 1px 8px;
+        border-radius: 10px;
+        white-space: nowrap;
+      }
+      .regen-chip.hit {
+        background: var(--chip-add);
+        color: var(--chip-add-fg);
+      }
+      .regen-chip.miss {
+        background: var(--chip-default);
+        color: var(--chip-default-fg);
+      }
+      .regen-chip.form {
+        background: var(--chip-modify);
+        color: var(--chip-modify-fg);
+      }
+      .regen-chip.err {
+        background: var(--chip-error);
+        color: var(--chip-error-fg);
+      }
+      .gen-view .comment-block .regen-chips {
+        display: flex;
+        gap: 6px;
+        padding: 6px 12px;
+        border-bottom: 1px solid var(--border-muted);
+      }
+      .gen-view .comment-block.miss pre {
+        color: var(--text-muted);
+        font-style: italic;
+      }
+      .gen-view .regen-target-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 14px 0 8px;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
     </style>
   </head>
   <body>
@@ -1925,8 +2067,20 @@
 
     <div class="gen-view" id="gen-view" style="display: none">
       <div class="gen-progress" id="gen-progress" aria-hidden="true"></div>
+      <div class="gen-inner" id="gen-mode-bar" style="padding-bottom: 0">
+        <div class="gen-mode-toggle" id="gen-mode-toggle">
+          <button data-mode="location" class="active">Location</button>
+          <button data-mode="regenerate">Regenerate</button>
+        </div>
+      </div>
       <div class="gen-inner" id="gen-breakdown" style="padding-bottom: 0"></div>
       <div class="gen-inner" id="gen-root"></div>
+      <div
+        class="gen-inner"
+        id="regen-summary"
+        style="padding-bottom: 0; display: none"
+      ></div>
+      <div class="gen-inner" id="regen-root" style="display: none"></div>
       <footer class="gen-footer">
         <span id="gen-count"></span> · built from <span id="gen-source"></span>
       </footer>
@@ -2087,6 +2241,8 @@
         gen.loaded = false; // force ensureGenerations to refetch for this generation
         gen.data = null;
         gen.dirty = false;
+        regen.loaded = false;
+        regen.data = null;
         state.selectedIndex = null;
         state.currentRecord = null;
         state.commentDetail = null;
@@ -2094,7 +2250,7 @@
         await reloadRecords();
         const inGenView =
           document.getElementById("gen-view").style.display !== "none";
-        if (inGenView) await ensureGenerations();
+        if (inGenView) await ensureActiveGenMode();
       }
 
       // Every server request that depends on the active generation carries it as
@@ -2753,8 +2909,8 @@
 
       // The prompt is built per comment target and is identical across the
       // models run on it, so show it once for the whole generation group.
-      function appendGenerationPrompt(panel, results) {
-        const promptText = (results.find((r) => r.prompt) || {}).prompt || "";
+      function appendGenerationPrompt(panel, generation) {
+        const promptText = generation.prompt || "";
         if (!promptText) return;
         const details = document.createElement("details");
         details.className = "gen-prompt";
@@ -2767,17 +2923,13 @@
       }
 
       function appendModelGenerations(panel, record, comment, path) {
-        // Newer records flatten the target fields onto the generation itself;
-        // older ones nest them under `target`. Support both.
-        const generation = (record.comment_generations || []).find((g) => {
-          const target = g.target || g;
-          return (
-            target.type === comment.type &&
-            target.anchor === comment.anchor &&
-            target.start_line === comment.start_line &&
-            target.end_line === comment.end_line
-          );
-        });
+        const generation = (record.comment_generations || []).find(
+          (g) =>
+            g.type === comment.type &&
+            g.anchor === comment.anchor &&
+            g.start_line === comment.start_line &&
+            g.end_line === comment.end_line,
+        );
 
         const heading = document.createElement("div");
         heading.className = "model-gen-heading";
@@ -2793,7 +2945,7 @@
           return;
         }
 
-        appendGenerationPrompt(panel, results);
+        appendGenerationPrompt(panel, generation);
 
         const sorted = results
           .slice()
@@ -2940,6 +3092,7 @@
       const gen = {
         loaded: false,
         markedReady: false,
+        mode: "location", // which sub-view is active: "location" | "regenerate"
         data: null,
         query: "",
         notes: {},
@@ -2950,6 +3103,16 @@
         dirty: false,
         cardByKey: {},
         blockByKey: {},
+      };
+
+      // State for the Regenerate sub-view (scope regenerations). Kept separate
+      // from `gen` so switching modes never disturbs the location cards'
+      // expanded state or unsaved notes.
+      const regen = {
+        loaded: false,
+        data: null,
+        expanded: new Set(),
+        metricsCollapsed: false,
       };
 
       // Palette cycled through when auto-coloring newly created tags.
@@ -2966,8 +3129,12 @@
           isGen || isIntent ? "none" : "";
         document.getElementById("gen-view").style.display = isGen ? "" : "none";
         document.getElementById("intent-view").style.display = isIntent ? "" : "none";
-        for (const id of ["gen-search", "gen-review-count", "gen-save"]) {
-          document.getElementById(id).style.display = isGen ? "" : "none";
+        document.getElementById("gen-search").style.display = isGen ? "" : "none";
+        // Review notes belong to the location sub-view; the save controls hide
+        // while the (read-only) regenerate sub-view is active.
+        for (const id of ["gen-review-count", "gen-save"]) {
+          document.getElementById(id).style.display =
+            isGen && gen.mode === "location" ? "" : "none";
         }
         for (const id of ["intent-search", "intent-review-count", "intent-save"]) {
           document.getElementById(id).style.display = isIntent ? "" : "none";
@@ -2975,8 +3142,48 @@
         for (const button of document.querySelectorAll("#view-toggle button")) {
           button.classList.toggle("active", button.dataset.view === view);
         }
-        if (isGen) ensureGenerations();
+        if (isGen) ensureActiveGenMode();
         if (isIntent) ensureIntents();
+      }
+
+      function setGenMode(mode) {
+        gen.mode = mode;
+        const isLocation = mode === "location";
+        for (const button of document.querySelectorAll("#gen-mode-toggle button")) {
+          button.classList.toggle("active", button.dataset.mode === mode);
+        }
+        document.getElementById("gen-progress").style.display = isLocation
+          ? ""
+          : "none";
+        document.getElementById("gen-breakdown").style.display = isLocation
+          ? ""
+          : "none";
+        document.getElementById("gen-root").style.display = isLocation ? "" : "none";
+        document.getElementById("regen-summary").style.display = isLocation
+          ? "none"
+          : "";
+        document.getElementById("regen-root").style.display = isLocation
+          ? "none"
+          : "";
+        const inGenView =
+          document.getElementById("gen-view").style.display !== "none";
+        for (const id of ["gen-review-count", "gen-save"]) {
+          document.getElementById(id).style.display =
+            inGenView && isLocation ? "" : "none";
+        }
+        ensureActiveGenMode();
+      }
+
+      // Fetch-or-rerender whichever sub-view is active. Rendering on every
+      // switch keeps the shared footer counts and search filter current.
+      async function ensureActiveGenMode() {
+        if (gen.mode === "regenerate") {
+          if (regen.data) renderRegenerations();
+          else await ensureRegenerations();
+        } else {
+          if (gen.data) renderGenerations();
+          else await ensureGenerations();
+        }
       }
 
       async function ensureGenerations() {
@@ -2995,6 +3202,400 @@
         renderGenerations();
         updateSaveButton();
         updateReviewCount();
+      }
+
+      // ===== Regenerate sub-view =====
+      // One card per scope the models rewrote with comments added. Read-only:
+      // no review notes or failure-mode tags in this mode.
+
+      async function ensureRegenerations() {
+        if (regen.loaded) return;
+        regen.loaded = true;
+        configureMarked();
+        const response = await fetch(withGeneration("/regenerations"));
+        regen.data = await response.json();
+        renderRegenerations();
+      }
+
+      function regenHaystack(scope) {
+        const parts = [scope.repo, scope.path];
+        for (const target of scope.targets || []) {
+          parts.push(target.comment, target.anchor);
+        }
+        for (const result of scope.results || []) {
+          parts.push(result.model);
+          for (const extraction of result.extractions || []) {
+            parts.push(extraction.comment_text);
+          }
+        }
+        return parts.filter(Boolean).join(" ").toLowerCase();
+      }
+
+      function renderRegenerations() {
+        if (!regen.data) return;
+        const root = document.getElementById("regen-root");
+        root.innerHTML = "";
+        const query = gen.query.trim().toLowerCase();
+        const filtered = query
+          ? regen.data.scopes.filter((scope) =>
+              regenHaystack(scope).includes(query),
+            )
+          : regen.data.scopes;
+
+        if (!regen.data.scopes.length) {
+          const empty = document.createElement("div");
+          empty.className = "gen-empty";
+          empty.innerHTML =
+            `<h2>No regenerate output</h2>` +
+            `<p>This generation was produced without the regenerate approach.</p>`;
+          root.appendChild(empty);
+        } else if (!filtered.length) {
+          const empty = document.createElement("div");
+          empty.className = "gen-empty";
+          empty.innerHTML = `<h2>No matches</h2><p>Try a different search term.</p>`;
+          root.appendChild(empty);
+        } else {
+          for (const scope of filtered) {
+            root.appendChild(buildRegenCard(scope));
+          }
+        }
+
+        renderRegenSummary();
+
+        const repoCount = new Set(regen.data.scopes.map((scope) => scope.repo))
+          .size;
+        const modelLabel =
+          regen.data.models.length === 1
+            ? regen.data.models[0]
+            : `${regen.data.models.length} models`;
+        document.getElementById("gen-count").textContent =
+          `${filtered.length}${query ? ` of ${regen.data.scopes.length}` : ""} ` +
+          `scope${filtered.length === 1 ? "" : "s"} · ` +
+          `${repoCount} repo${repoCount === 1 ? "" : "s"} · ${modelLabel}`;
+        document.getElementById("gen-source").textContent =
+          regen.data.source + " · generated " + regen.data.generated_at;
+      }
+
+      // The per-model rows of metrics_regenerate.json (written by eval.py);
+      // absent until eval has run on this generation.
+      const REGEN_METRIC_ROWS = [
+        ["regen_failure_rate", "Failure rate", "percent"],
+        ["placement_recall", "Placement recall", "percent"],
+        ["form_match_rate", "Form match", "percent"],
+        ["bleu4_corpus", "BLEU-4 (corpus)", "score"],
+        ["rougeL", "ROUGE-L", "score"],
+        ["bertscore_f1", "BERTScore F1", "score"],
+      ];
+
+      function renderRegenSummary() {
+        const summaryRoot = document.getElementById("regen-summary");
+        summaryRoot.innerHTML = "";
+        const metrics = regen.data.metrics;
+        if (!metrics) return;
+        const models = Object.keys(metrics).sort();
+        if (!models.length) return;
+
+        const card = document.createElement("section");
+        card.className =
+          "breakdown-card" + (regen.metricsCollapsed ? " collapsed" : "");
+        const head = document.createElement("div");
+        head.className = "breakdown-head";
+        head.innerHTML = `
+          ${iconSvg("chevron-down", "breakdown-toggle")}
+          <span class="breakdown-title">Regeneration metrics</span>
+          <span class="breakdown-sub">${models.length} model${
+            models.length === 1 ? "" : "s"
+          } · text metrics over placement hits</span>
+        `;
+        head.addEventListener("click", () => {
+          regen.metricsCollapsed = !regen.metricsCollapsed;
+          card.classList.toggle("collapsed", regen.metricsCollapsed);
+        });
+        card.appendChild(head);
+
+        const body = document.createElement("div");
+        body.className = "breakdown-body";
+        card.appendChild(body);
+
+        const formatValue = (value, kind) => {
+          if (value == null) return "–";
+          if (kind === "percent") return (value * 100).toFixed(1) + "%";
+          return value.toFixed(3);
+        };
+        let rowsHtml = "";
+        for (const [key, label, kind] of REGEN_METRIC_ROWS) {
+          rowsHtml +=
+            `<tr><td class="bd-row-label">${label}</td>` +
+            models
+              .map(
+                (model) =>
+                  `<td class="bd-count">${formatValue(metrics[model][key], kind)}</td>`,
+              )
+              .join("") +
+            `</tr>`;
+        }
+        const table = document.createElement("table");
+        table.className = "breakdown-table";
+        table.innerHTML =
+          `<thead><tr><th class="bd-row-label">Metric</th>` +
+          models.map((model) => `<th>${escapeHTML(model)}</th>`).join("") +
+          `</tr></thead><tbody>${rowsHtml}</tbody>`;
+        body.appendChild(table);
+        summaryRoot.appendChild(card);
+      }
+
+      function extractionChipsHTML(extraction) {
+        if (extraction.error) {
+          return `<span class="regen-chip err">unscorable</span>`;
+        }
+        if (!extraction.placement_hit) {
+          return `<span class="regen-chip miss">miss</span>`;
+        }
+        let chips = `<span class="regen-chip hit">hit</span>`;
+        if (extraction.form_matches === false) {
+          chips += `<span class="regen-chip form">wrong form</span>`;
+        }
+        return chips;
+      }
+
+      // A model's extracted comment for one target, as a comment block with
+      // placement chips under the model-name header.
+      function regenExtractionBlock(model, extraction) {
+        let block;
+        if (extraction.error) {
+          block = genCommentBlock("model", model, null, extraction.error, null);
+        } else if (!extraction.placement_hit) {
+          block = genCommentBlock(
+            "model",
+            model,
+            "(no comment at this location)",
+            null,
+            null,
+          );
+          block.classList.add("miss");
+        } else {
+          block = genCommentBlock(
+            "model",
+            model,
+            extraction.comment_text,
+            null,
+            extraction.scores,
+          );
+        }
+        const chips = document.createElement("div");
+        chips.className = "regen-chips";
+        chips.innerHTML = extractionChipsHTML(extraction);
+        block.querySelector(".cb-head").insertAdjacentElement("afterend", chips);
+        return block;
+      }
+
+      // The server's diff already carries ---/+++ file headers; diff2html just
+      // needs the leading `diff --git` line synthesized.
+      function renderRegenDiff(body, path, diffText) {
+        const filepath = path || "file.py";
+        const unified = `diff --git a/${filepath} b/${filepath}\n` + diffText;
+        const container = document.createElement("div");
+        container.className = "gen-diff";
+        const ui = new Diff2HtmlUI(container, unified, {
+          drawFileList: false,
+          matching: "lines",
+          outputFormat: "line-by-line",
+          highlight: true,
+          colorScheme: "dark",
+        });
+        ui.draw();
+        ui.highlightCode();
+        body.appendChild(container);
+      }
+
+      function buildRegenResult(scope, result) {
+        const container = document.createElement("div");
+        container.className = "regen-result" + (result.error ? " error" : "");
+
+        const head = document.createElement("div");
+        head.className = "regen-result-head";
+        const model = escapeHTML(result.model || "(model)");
+        if (result.error) {
+          head.innerHTML = `${model} <span class="regen-chip err">rejected</span>`;
+        } else {
+          const targetCount = (result.extractions || []).length;
+          head.innerHTML =
+            `${model} <span class="regen-chip ${
+              result.hit_count ? "hit" : "miss"
+            }">${result.hit_count}/${targetCount} target${
+              targetCount === 1 ? "" : "s"
+            } commented</span>`;
+        }
+        container.appendChild(head);
+
+        const body = document.createElement("div");
+        body.className = "regen-result-body";
+        if (result.error) {
+          const errorText = document.createElement("pre");
+          errorText.className = "regen-error-text";
+          errorText.innerHTML = `${iconSvg("alert-triangle")} ${escapeHTML(result.error)}`;
+          body.appendChild(errorText);
+          const raw = document.createElement("details");
+          raw.className = "regen-raw";
+          const summary = document.createElement("summary");
+          summary.textContent = "Raw model response";
+          const pre = document.createElement("pre");
+          pre.textContent = result.raw_response || "(empty)";
+          raw.append(summary, pre);
+          body.appendChild(raw);
+        } else if (!result.diff) {
+          body.innerHTML =
+            `<div class="regen-nodiff">Code reproduced unchanged — ` +
+            `the model added no comments.</div>`;
+        } else {
+          renderRegenDiff(body, scope.path, result.diff);
+        }
+        container.appendChild(body);
+        return container;
+      }
+
+      function buildRegenCard(scope) {
+        const key = scope.key;
+        const collapsed = !regen.expanded.has(key);
+        const card = document.createElement("section");
+        card.className = "target-card" + (collapsed ? " collapsed" : "");
+        card.dataset.key = key;
+
+        const repo = repoLink(scope.repo || "(no repo)", "repo");
+        const commit = scope.commit
+          ? commitLink(
+              scope.repo || "",
+              scope.commit_full || "",
+              scope.commit,
+              "commit-sha",
+            )
+          : "";
+        const path = escapeHTML(scope.path || "");
+        const lines =
+          scope.scope_start_line == null
+            ? ""
+            : `L${scope.scope_start_line}-${scope.scope_end_line}`;
+        const targetCount = (scope.targets || []).length;
+
+        const header = document.createElement("div");
+        header.className = "card-header";
+        header.innerHTML = `
+          ${iconSvg("chevron-down", "card-toggle")}
+          <div class="ch-main">
+            <div class="ch-top">
+              ${repo}
+              <span class="path" title="${path}">${path}</span>
+              <span class="ch-chips">
+                <span class="gchip scope">scope</span>
+                <span class="gchip block">${targetCount} target${
+                  targetCount === 1 ? "" : "s"
+                }</span>
+              </span>
+            </div>
+            <div class="ch-meta">
+              ${commit ? `<span class="commit">@${commit}</span>` : ""}
+              ${lines ? `<span class="lines">${lines}</span>` : ""}
+            </div>
+          </div>
+        `;
+        header.addEventListener("click", (event) => {
+          if (event.target.closest("a")) return;
+          const nowCollapsed = card.classList.toggle("collapsed");
+          if (nowCollapsed) regen.expanded.delete(key);
+          else regen.expanded.add(key);
+        });
+
+        const actions = document.createElement("div");
+        actions.className = "ch-actions";
+        const copyButton = document.createElement("button");
+        copyButton.type = "button";
+        copyButton.className = "card-copy";
+        copyButton.title = "Copy prompt";
+        copyButton.innerHTML = iconSvg("copy");
+        copyButton.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(scope.prompt || "");
+            copyButton.innerHTML = iconSvg("check");
+            copyButton.classList.add("copied");
+            setTimeout(() => {
+              copyButton.innerHTML = iconSvg("copy");
+              copyButton.classList.remove("copied");
+            }, 1200);
+          } catch (error) {
+            alert("Copy failed: " + error.message);
+          }
+        });
+        actions.appendChild(copyButton);
+        header.appendChild(actions);
+        card.appendChild(header);
+
+        const body = document.createElement("div");
+        body.className = "card-body";
+        card.appendChild(body);
+
+        const promptLabel = document.createElement("div");
+        promptLabel.className = "section-label";
+        promptLabel.textContent = "Prompt";
+        body.appendChild(promptLabel);
+
+        const promptWrap = document.createElement("div");
+        promptWrap.className = "prompt-wrap";
+        body.appendChild(promptWrap);
+        renderPrompt(promptWrap, scope);
+
+        const resultsLabel = document.createElement("div");
+        resultsLabel.className = "section-label";
+        resultsLabel.innerHTML = `<span class="dot model"></span> Regenerations (diff vs input)`;
+        body.appendChild(resultsLabel);
+        for (const result of scope.results || []) {
+          body.appendChild(buildRegenResult(scope, result));
+        }
+
+        const compareLabel = document.createElement("div");
+        compareLabel.className = "section-label";
+        compareLabel.innerHTML = `
+          <span class="dot human"></span> Human
+          <span style="opacity:0.4; padding:0 6px;">vs</span>
+          <span class="dot model"></span> Models, per target
+        `;
+        body.appendChild(compareLabel);
+
+        const validResults = (scope.results || []).filter(
+          (result) => !result.error,
+        );
+        (scope.targets || []).forEach((target, targetIndex) => {
+          const targetHead = document.createElement("div");
+          targetHead.className = "regen-target-head";
+          const typeChip = target.type
+            ? `<span class="gchip ${escapeHTML(target.type)}">${escapeHTML(target.type)}</span>`
+            : "";
+          const intentChip = target.intent
+            ? `<span class="intent-chip ${target.intent}">${target.intent}</span>`
+            : "";
+          const anchor = target.anchor
+            ? `<span class="anchor-pill" title="${escapeHTML(target.anchor)}">${escapeHTML(target.anchor)}</span>`
+            : "";
+          targetHead.innerHTML =
+            `<span>Target ${genLineLabel(target)}</span>${typeChip}${intentChip}${anchor}`;
+          body.appendChild(targetHead);
+
+          const grid = document.createElement("div");
+          grid.className = "comments-grid";
+          grid.appendChild(
+            genCommentBlock("human", "Human", target.comment, null),
+          );
+          for (const result of validResults) {
+            const extraction = (result.extractions || [])[targetIndex];
+            if (!extraction) continue;
+            grid.appendChild(
+              regenExtractionBlock(result.model || "(model)", extraction),
+            );
+          }
+          body.appendChild(grid);
+        });
+
+        return card;
       }
 
       // --- Failure-mode tag catalog -------------------------------------
@@ -4228,11 +4829,18 @@
         button.addEventListener("click", () => setView(button.dataset.view));
       }
 
+      for (const button of document.querySelectorAll("#gen-mode-toggle button")) {
+        button.addEventListener("click", () => setGenMode(button.dataset.mode));
+      }
+
       let genSearchTimer = null;
       document.getElementById("gen-search").addEventListener("input", (event) => {
         gen.query = event.target.value;
         clearTimeout(genSearchTimer);
-        genSearchTimer = setTimeout(renderGenerations, 150);
+        genSearchTimer = setTimeout(() => {
+          if (gen.mode === "regenerate") renderRegenerations();
+          else renderGenerations();
+        }, 150);
       });
 
       // Tag manager modal wiring.

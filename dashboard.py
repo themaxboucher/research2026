@@ -8,6 +8,7 @@ import re
 import shutil
 import socket
 import sys
+import textwrap
 import webbrowser
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -15,12 +16,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-import generations
-from comments import is_machine_directive_comment
+import generate
+from comments import apply_generated_comment, is_machine_directive_comment
 from runs import require_latest_run_directory
 
 DATASET_FILENAME = "repo_files_sample"
-GENERATED_FILENAME = "files_generated"
+REGENERATED_METRICS_FILENAME = "metrics_regenerate.json"
 NOTES_FILENAME = "review_notes.json"
 DASHBOARD_HTML = Path(__file__).parent / "dashboard.html"
 DEFAULT_PAGE_LIMIT = 200
@@ -59,20 +60,15 @@ META_FIELDS = (
 )
 
 
-def _comment_generation_count(record: dict, comment: dict) -> int | None:
-    """Number of model generations produced for `comment`, or None if the record
-    holds no generation for it. Generations are matched to a comment by their
-    target fields (newer records flatten them onto the generation; older ones
-    nest them under a `target` key)."""
-    generations = record.get("comment_generations")
-    if not generations:
-        return None
-    for generation in generations:
-        target = generation.get("target") or generation
+def _comment_generation_count(gen_record: dict, comment: dict) -> int | None:
+    """Number of model results the generation record holds for `comment`, or
+    None when the generation didn't target it. Matched by the comment's
+    identity fields (type and line span)."""
+    for generation in gen_record.get("comment_generations") or []:
         if (
-            target.get("type") == comment.get("type")
-            and target.get("start_line") == comment.get("start_line")
-            and target.get("end_line") == comment.get("end_line")
+            generation.get("type") == comment.get("type")
+            and generation.get("start_line") == comment.get("start_line")
+            and generation.get("end_line") == comment.get("end_line")
         ):
             return len(generation.get("results") or [])
     return None
@@ -80,18 +76,14 @@ def _comment_generation_count(record: dict, comment: dict) -> int | None:
 
 def _sidebar_comments(record: dict) -> list[dict]:
     """The added/modified inline/block comments shown under a file in the
-    sidebar, each annotated with its model-generation count when present."""
+    sidebar."""
     comments = []
     for comment in record.get("comments") or []:
         if comment.get("type") not in SIDEBAR_COMMENT_TYPES:
             continue
         if comment.get("status") not in SIDEBAR_COMMENT_STATUSES:
             continue
-        entry = {field: comment.get(field) for field in SIDEBAR_COMMENT_FIELDS}
-        generation_model_count = _comment_generation_count(record, comment)
-        if generation_model_count is not None:
-            entry["generation_model_count"] = generation_model_count
-        comments.append(entry)
+        comments.append({field: comment.get(field) for field in SIDEBAR_COMMENT_FIELDS})
     return comments
 
 
@@ -135,8 +127,6 @@ def _build_index(source_path: Path) -> tuple[list[dict], dict]:
             entry["comment_count"] = len(record.get("comments") or [])
             entry["sidebar_comments"] = _sidebar_comments(record)
             sidebar_comment_total += len(entry["sidebar_comments"])
-            if "comment_generations" in record:
-                entry["generation_count"] = len(record["comment_generations"] or [])
             sidebar.append(entry)
 
             if entry["repo_name"]:
@@ -218,47 +208,45 @@ def _record_key(entry: dict) -> tuple:
     )
 
 
-def _match_generated(sidebar: list[dict], generated_entries: list[dict]) -> int:
-    """Attach generation info to sidebar entries. files_generated.jsonl is an
-    ordered subsequence of repo_files.jsonl (generate.py preserves order), so
-    walk both in order; duplicate keys resolve naturally by position."""
+def _match_generated(sidebar: list[dict], generated_records: dict[tuple, dict]) -> int:
+    """Attach generation info to sidebar entries, joining each slim generation
+    record to its source file by the (repo, commit, path) key it carries."""
     matched = 0
-    sidebar_pos = 0
-    for generated in generated_entries:
-        key = _record_key(generated)
-        while sidebar_pos < len(sidebar) and _record_key(sidebar[sidebar_pos]) != key:
-            sidebar_pos += 1
-        if sidebar_pos >= len(sidebar):
-            logging.warning(
-                "No repo_files match for generated record %s (and %d after it)",
-                key,
-                len(generated_entries) - generated["index"] - 1,
-            )
-            break
-        entry = sidebar[sidebar_pos]
-        entry["generation_count"] = generated.get("generation_count") or 0
-        entry["gen_offset"] = generated["offset"]
-        # The source index is built from repo_files_sample.jsonl, which has no
-        # generations; the generated index carries the same comments annotated
-        # with per-comment generation counts, so adopt those for the sidebar.
-        if generated.get("sidebar_comments"):
-            entry["sidebar_comments"] = generated["sidebar_comments"]
-        sidebar_pos += 1
+    for entry in sidebar:
+        gen_record = generated_records.get(_record_key(entry))
+        if gen_record is None:
+            continue
+        entry["generation_count"] = len(gen_record.get("comment_generations") or [])
+        for comment in entry.get("sidebar_comments") or []:
+            count = _comment_generation_count(gen_record, comment)
+            if count is not None:
+                comment["generation_model_count"] = count
         matched += 1
     return matched
 
 
 def _attach_generation_diffs(record: dict) -> None:
-    """For each model result under each comment generation, attach a unified
-    diff of the human source vs the model's new source. Since new_source_code
-    differs from source_code only at the target comment, this is a single small
-    hunk that the dashboard renders as the model's diff hunk."""
+    """For each model result under each comment generation, rebuild the model's
+    patched source (generation records store only the comment text) and attach
+    a unified diff of the human source vs it. Since the patched source differs
+    only at the target comment, this is a single small hunk that the dashboard
+    renders as the model's diff hunk."""
     source_code = record.get("source_code") or ""
     filepath = record.get("new_path") or record.get("filename") or "file.py"
     for generation in record.get("comment_generations") or []:
         for result in generation.get("results") or []:
-            new_source_code = result.get("new_source_code")
-            if not new_source_code:
+            comment_text = result.get("comment_text")
+            if not comment_text:
+                result["diff"] = ""
+                continue
+            try:
+                new_source_code = apply_generated_comment(
+                    source_code, generation, comment_text
+                )
+            except Exception:
+                logging.warning(
+                    "Could not rebuild patched source for %s", filepath, exc_info=True
+                )
                 result["diff"] = ""
                 continue
             diff_lines = difflib.unified_diff(
@@ -381,8 +369,8 @@ def _stamp_record_intents(record: dict, intent_map: dict[str, str]) -> None:
 # --- Generations analysis view -------------------------------------------
 # The "Generations" view is a flat comparison of every comment-generation
 # target: the prompt sent to the models, the human's comment, and each model's
-# generated comment side by side. Built once from files_generated.jsonl and
-# cached; served to the client as a single JSON payload.
+# generated comment side by side. Built once from the generation's in-memory
+# location_generated records and cached; served as a single JSON payload.
 
 # The prompt wraps the diff in an XML-ish tag. Convert it to a fenced markdown
 # code block so the client can syntax-highlight it.
@@ -413,19 +401,7 @@ def _trim_target(record: dict, generation: dict, intent_map: dict[str, str]) -> 
             trimmed["scores"] = result["scores"]
         results.append(trimmed)
 
-    # Newer generations store the prompt once on the generation; older ones
-    # repeated it on each result. Prefer the generation-level prompt, falling
-    # back to the first result that carries one.
     prompt_text = generation.get("prompt") or ""
-    if not prompt_text:
-        prompt_text = next(
-            (
-                result["prompt"]
-                for result in generation.get("results") or []
-                if result.get("prompt")
-            ),
-            "",
-        )
 
     repo = record.get("repo_name") or ""
     commit_full = record.get("commit_hash") or ""
@@ -453,33 +429,24 @@ def _trim_target(record: dict, generation: dict, intent_map: dict[str, str]) -> 
 
 
 def _collect_targets(
-    generated_path: Path, intent_map: dict[str, str]
+    generated_records: list[dict], intent_map: dict[str, str]
 ) -> tuple[list[dict], set[str]]:
     targets: list[dict] = []
     models: set[str] = set()
-    with generated_path.open("r", encoding="utf-8") as source_file:
-        for raw_line in source_file:
-            stripped = raw_line.strip()
-            if not stripped:
-                continue
-            try:
-                record = json.loads(stripped)
-            except ValueError:
-                logging.warning("Skipping unparseable line in %s", generated_path)
-                continue
-            for generation in record.get("comment_generations") or []:
-                target = _trim_target(record, generation, intent_map)
-                for result in target["results"]:
-                    if result["model"]:
-                        models.add(result["model"])
-                targets.append(target)
+    for record in generated_records:
+        for generation in record.get("comment_generations") or []:
+            target = _trim_target(record, generation, intent_map)
+            for result in target["results"]:
+                if result["model"]:
+                    models.add(result["model"])
+            targets.append(target)
     return targets, models
 
 
 def _build_generations_payload(
-    generated_path: Path, source_name: str, intent_map: dict[str, str]
+    generated_records: list[dict], source_name: str, intent_map: dict[str, str]
 ) -> dict:
-    targets, models = _collect_targets(generated_path, intent_map)
+    targets, models = _collect_targets(generated_records, intent_map)
     logging.info(
         "Built generations view: %d targets across %d models",
         len(targets),
@@ -490,6 +457,155 @@ def _build_generations_payload(
         "source": source_name,
         "models": sorted(models),
         "targets": targets,
+    }
+
+
+# --- Regenerations view ----------------------------------------------------
+# The "Regenerate" sub-view of the Generations view: one card per scope that
+# was rewritten by the models with comments added. Each model result carries a
+# diff of the stripped input vs the regenerated code (only comment additions
+# for valid regenerations) plus the per-target extractions eval.py scored.
+# Built once per generation from regenerate_generated.jsonl and cached.
+
+
+def _regeneration_diff(input_code: str, regenerated_code: str, filepath: str) -> str:
+    """Unified diff of the stripped input scope vs the model's regeneration.
+    Both sides are dedented first so a model that uniformly dedented an
+    indented scope (accepted by the fidelity check) doesn't diff as a full
+    rewrite."""
+    diff_lines = difflib.unified_diff(
+        textwrap.dedent(input_code).splitlines(keepends=True),
+        textwrap.dedent(regenerated_code).splitlines(keepends=True),
+        fromfile=f"a/{filepath}",
+        tofile=f"b/{filepath}",
+    )
+    return "".join(diff_lines)
+
+
+def _trim_regeneration_result(result: dict, input_code: str, filepath: str) -> dict:
+    error = result.get("error")
+    trimmed = {
+        "model": _short_model_name(result.get("model") or ""),
+        "error": error,
+    }
+    if error:
+        # The raw response is what you need to see to understand why the
+        # fidelity check rejected the regeneration.
+        trimmed["raw_response"] = result.get("raw_response") or ""
+        return trimmed
+
+    trimmed["diff"] = _regeneration_diff(
+        input_code, result.get("regenerated_code") or "", filepath
+    )
+    extractions = []
+    for extraction in result.get("extractions") or []:
+        entry = {
+            "comment_text": extraction.get("comment_text"),
+            "placement_hit": extraction.get("placement_hit"),
+            "form_matches": extraction.get("form_matches"),
+            "error": extraction.get("error"),
+        }
+        if "scores" in extraction:
+            entry["scores"] = extraction["scores"]
+        extractions.append(entry)
+    trimmed["extractions"] = extractions
+    trimmed["hit_count"] = sum(
+        1 for extraction in extractions if extraction["placement_hit"]
+    )
+    return trimmed
+
+
+def _trim_scope(record: dict, intent_map: dict[str, str]) -> dict:
+    repo = record.get("repo_name") or ""
+    commit_full = record.get("commit_hash") or ""
+    path = record.get("new_path") or ""
+    input_code = record.get("input_code") or ""
+
+    targets = []
+    for target in record.get("targets") or []:
+        key = _comment_key(
+            {"repo_name": repo, "commit_hash": commit_full, "new_path": path}, target
+        )
+        targets.append(
+            {
+                "type": target.get("type") or "",
+                "intent": intent_map.get(key) or target.get("intent"),
+                "start_line": target.get("start_line"),
+                "end_line": target.get("end_line"),
+                "anchor": target.get("anchor") or "",
+                "comment": target.get("comment") or "",
+            }
+        )
+
+    return {
+        "key": "|".join(
+            str(part)
+            for part in (
+                repo,
+                commit_full[:7],
+                path,
+                record.get("scope_start_line"),
+                record.get("scope_end_line"),
+            )
+        ),
+        "repo": repo,
+        "commit": commit_full[:7],
+        "commit_full": commit_full,
+        "path": path,
+        "scope_start_line": record.get("scope_start_line"),
+        "scope_end_line": record.get("scope_end_line"),
+        "prompt": record.get("prompt") or "",
+        "targets": targets,
+        "results": [
+            _trim_regeneration_result(result, input_code, path)
+            for result in record.get("results") or []
+        ],
+    }
+
+
+def _load_regeneration_metrics(gen_dir: Path) -> dict | None:
+    metrics_path = gen_dir / REGENERATED_METRICS_FILENAME
+    if not metrics_path.exists():
+        return None
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    return {_short_model_name(model): values for model, values in metrics.items()}
+
+
+def _empty_regenerations_payload(source_name: str) -> dict:
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": source_name,
+        "models": [],
+        "scopes": [],
+        "metrics": None,
+    }
+
+
+def _build_regenerations_payload(
+    gen_dir: Path, source_name: str, intent_map: dict[str, str]
+) -> dict:
+    regenerated_path = gen_dir / f"{generate.REGENERATE_FILENAME}.jsonl"
+    if not regenerated_path.exists():
+        return _empty_regenerations_payload(source_name)
+
+    scopes: list[dict] = []
+    models: set[str] = set()
+    for record in _iter_source_records(regenerated_path):
+        scope = _trim_scope(record, intent_map)
+        for result in scope["results"]:
+            if result["model"]:
+                models.add(result["model"])
+        scopes.append(scope)
+
+    logging.info(
+        "Built regenerations view: %d scopes across %d models", len(scopes), len(models)
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "source": source_name,
+        "models": sorted(models),
+        "scopes": scopes,
+        "metrics": _load_regeneration_metrics(gen_dir),
     }
 
 
@@ -606,29 +722,45 @@ def _write_intents_to_source(source_path: Path, intents: dict[str, str]) -> int:
 def _build_generation_state(
     gen_dir: Path, base_sidebar: list[dict], intent_map: dict[str, str]
 ) -> dict:
-    """Everything the handler needs to serve one generation: its output path, a
-    private copy of the source sidebar annotated with this generation's counts
-    and offsets, the display-ordered view of it, and where its notes live. Built
-    lazily and cached per generation so switching is cheap and generations never
-    contaminate each other's sidebar annotations."""
-    generated_path, generated_entries, _ = _load_index(gen_dir, GENERATED_FILENAME)
+    """Everything the handler needs to serve one generation: its slim records
+    held in memory keyed for joining against the source, a private copy of the
+    source sidebar annotated with this generation's counts, the display-ordered
+    view of it, and where its notes live. Built lazily and cached per generation
+    so switching is cheap and generations never contaminate each other's sidebar
+    annotations. A generation produced with only the regenerate approach has no
+    location_generated.jsonl; it serves the bare source sidebar and an empty
+    per-target comparison."""
     sidebar = copy.deepcopy(base_sidebar)
-    matched = _match_generated(sidebar, generated_entries)
-    # A generation's copied comments predate labeling, so re-stamp intent from
-    # the source so the sidebar's intent chips are correct here too.
+    generated_records = None
+    location_path = gen_dir / f"{generate.LOCATION_FILENAME}.jsonl"
+    if location_path.exists():
+        generated_records = {
+            _record_key(record): record for record in _iter_source_records(location_path)
+        }
+        matched = _match_generated(sidebar, generated_records)
+        if matched < len(generated_records):
+            logging.warning(
+                "%d generated record(s) have no repo_files match in generation %s",
+                len(generated_records) - matched,
+                gen_dir.name,
+            )
+        logging.info(
+            "Matched %d of %d generated records for generation %s",
+            matched,
+            len(generated_records),
+            gen_dir.name,
+        )
+    # Sidebar comments come from the source index, which may predate the latest
+    # labeling pass, so re-stamp intent to keep the chips current.
     _stamp_sidebar_intents(sidebar, intent_map)
-    logging.info(
-        "Matched %d of %d generated records for generation %s",
-        matched,
-        len(generated_entries),
-        gen_dir.name,
-    )
     return {
-        "generated_path": generated_path,
+        "gen_dir": gen_dir,
+        "generated_records": generated_records,
         "sidebar": sidebar,
         "ordered_sidebar": _display_order(sidebar),
         "notes_path": gen_dir / NOTES_FILENAME,
         "payload": None,  # generations comparison payload, built on first request
+        "regen_payload": None,  # regenerations payload, built on first request
     }
 
 
@@ -703,7 +835,7 @@ def _make_handler(
 
             if path == "/generations":
                 state = self._generation_state(self._resolve_gen_id(params))
-                if state is None:
+                if state is None or state["generated_records"] is None:
                     self._send_json(
                         {
                             "generated_at": datetime.now(timezone.utc).isoformat(
@@ -717,9 +849,23 @@ def _make_handler(
                     return
                 if state["payload"] is None:
                     state["payload"] = _build_generations_payload(
-                        state["generated_path"], run_dir.name, intent_map
+                        list(state["generated_records"].values()),
+                        run_dir.name,
+                        intent_map,
                     )
                 self._send_json(state["payload"])
+                return
+
+            if path == "/regenerations":
+                state = self._generation_state(self._resolve_gen_id(params))
+                if state is None:
+                    self._send_json(_empty_regenerations_payload(run_dir.name))
+                    return
+                if state["regen_payload"] is None:
+                    state["regen_payload"] = _build_regenerations_payload(
+                        state["gen_dir"], run_dir.name, intent_map
+                    )
+                self._send_json(state["regen_payload"])
                 return
 
             if path == "/intents":
@@ -751,16 +897,14 @@ def _make_handler(
                     self._send_json({"error": "out of range"}, HTTPStatus.NOT_FOUND)
                     return
                 entry = sidebar[index]
-                if state is not None and "gen_offset" in entry:
-                    record = _read_record(state["generated_path"], entry["gen_offset"])
-                    _attach_generation_diffs(record)
-                    if record.get("commit_message") is None:
-                        # Generation files predate commit-message enrichment;
-                        # the source sample record carries the field.
-                        source_record = _read_record(source_path, entry["offset"])
-                        record["commit_message"] = source_record.get("commit_message")
-                else:
-                    record = _read_record(source_path, entry["offset"])
+                record = _read_record(source_path, entry["offset"])
+                if state is not None and state["generated_records"]:
+                    gen_record = state["generated_records"].get(_record_key(entry))
+                    if gen_record is not None:
+                        record["comment_generations"] = gen_record[
+                            "comment_generations"
+                        ]
+                        _attach_generation_diffs(record)
                 _stamp_record_intents(record, intent_map)
                 self._send_json(record)
                 return
@@ -849,7 +993,7 @@ def serve(run_dir: Path, port: int | None, open_browser: bool) -> None:
 
     # One shared source, many generations. Each generation's sidebar annotations
     # and notes are served on demand and cached per id (see _generation_state).
-    generation_list = generations.list_generations(run_dir)
+    generation_list = generate.list_generations(run_dir)
     generations_by_id = {gen["id"]: gen for gen in generation_list}
     default_gen_id = generation_list[0]["id"] if generation_list else None
     states: dict[str, dict] = {}

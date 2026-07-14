@@ -1,6 +1,7 @@
 import ast
 import io
 import re
+import textwrap
 import tokenize
 
 
@@ -443,3 +444,70 @@ def strip_comments_from_file(
     return "".join(
         line for index, line in enumerate(source_lines) if index not in lines_to_drop
     )
+
+
+_MAX_COMMENT_LINE_LENGTH = 80
+
+
+def _wrap_comment_line(line: str) -> list[str]:
+    if len(line) <= _MAX_COMMENT_LINE_LENGTH:
+        return [line]
+    hash_count = len(line) - len(line.lstrip("#"))
+    prefix = line[:hash_count] + " "
+    content = line[hash_count:].strip()
+    wrapped = textwrap.wrap(
+        content,
+        width=_MAX_COMMENT_LINE_LENGTH,
+        initial_indent=prefix,
+        subsequent_indent=prefix,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return wrapped or [line]
+
+
+def _normalize_block_comment(text: str) -> list[str]:
+    lines = [line.strip() for line in text.strip().splitlines()]
+    lines = [line for line in lines if line.startswith("#")]
+    lines = lines or ["# " + text.strip().lstrip("#").strip()]
+    return [wrapped for line in lines for wrapped in _wrap_comment_line(line)]
+
+
+def _normalize_inline_comment(text: str) -> str:
+    line = text.strip().splitlines()[0].strip() if text.strip() else ""
+    if not line.startswith("#"):
+        line = "# " + line.lstrip("#").strip()
+    return line
+
+
+def _replace_inline_comment(line: str, anchor: str | None, comment_text: str) -> str:
+    naive_anchor_fallback = line.split("#", 1)[0].rstrip()
+    anchor = anchor or naive_anchor_fallback
+    two_spaces = "  "
+    return anchor + two_spaces + _normalize_inline_comment(comment_text)
+
+
+def apply_generated_comment(
+    source_code: str, human_comment_data: dict, generated_comment_text: str
+) -> str:
+    """The source file with the human's target comment replaced by a model's
+    generated text, normalized to the comment's form (inline or block)."""
+    source_code_lines = source_code.split("\n")
+    start_index = human_comment_data["start_line"] - 1
+
+    is_inline_comment = human_comment_data["type"] == "inline"
+    if is_inline_comment:
+        source_code_lines[start_index] = _replace_inline_comment(
+            source_code_lines[start_index],
+            human_comment_data.get("anchor"),
+            generated_comment_text,
+        )
+        return "\n".join(source_code_lines)
+
+    indentation = _line_indentation(source_code_lines[start_index])
+    block_lines = [
+        indentation + comment_line
+        for comment_line in _normalize_block_comment(generated_comment_text)
+    ]
+    source_code_lines[start_index : human_comment_data["end_line"]] = block_lines
+    return "\n".join(source_code_lines)

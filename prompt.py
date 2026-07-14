@@ -5,6 +5,8 @@ STATUS_TEMPLATE_PATHS = {
     "modified": Path(__file__).parent / "prompts" / "modify_comment.md",
 }
 
+REGENERATE_TEMPLATE_PATH = Path(__file__).parent / "prompts" / "regenerate_comments.md"
+
 INTENT_INSTRUCTION_PATHS = {
     "what": Path(__file__).parent / "prompts" / "what.md",
     "how": Path(__file__).parent / "prompts" / "how.md",
@@ -66,7 +68,22 @@ def _build_add_prompt(
     )
 
 
-def build_prompt(
+def build_regenerate_prompt(
+    repo_name: str,
+    filepath: str,
+    commit_message: str,
+    scope_code: str,
+) -> str:
+    template = REGENERATE_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return (
+        template.replace("{repo_name}", repo_name)
+        .replace("{filepath}", filepath)
+        .replace("{commit_message}", commit_message)
+        .replace("{scope_code}", scope_code)
+    )
+
+
+def build_location_prompt(
     repo_name: str,
     filepath: str,
     comment_data: dict,

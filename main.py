@@ -3,9 +3,10 @@ from collect import (
     finalize_collection,
     prepare_collection,
 )
-from generate import generate_comments_for_dataset
+from generate import APPROACHES, generate_comments_for_dataset
 from report import generate_report
 from runs import resolve_run_directory
+from sample import SAMPLE_FILENAME
 import argparse
 import logging
 from pathlib import Path
@@ -38,13 +39,15 @@ def parse_args():
         "label overwrites its output but keeps its review notes",
     )
     parser.add_argument(
-        "--report", action="store_true", help="Build dataset statistics and graphs"
+        "--approaches",
+        type=str,
+        default=",".join(APPROACHES),
+        help="Comma-separated generation approaches to run: 'location' prompts "
+        "for a comment at a given spot, 'regenerate' has the model rewrite each "
+        "scope with comments added (default: both)",
     )
     parser.add_argument(
-        "--report-dataset",
-        choices=["files_generated", "repo_files"],
-        default="files_generated",
-        help="Which dataset the report reads (default: the post-generation dataset)",
+        "--report", action="store_true", help="Build dataset statistics and graphs"
     )
     parser.add_argument(
         "--new-run",
@@ -160,11 +163,16 @@ def main():
     if args.finalize:
         finalize_collection(run_dir)
     if args.generate:
+        approaches = [
+            approach.strip()
+            for approach in args.approaches.split(",")
+            if approach.strip()
+        ]
         generate_comments_for_dataset(
-            run_dir, label=args.generation, limit=args.max_generate
+            run_dir, label=args.generation, limit=args.max_generate, approaches=approaches
         )
     if args.report:
-        generate_report(run_dir, args.report_dataset)
+        generate_report(run_dir, SAMPLE_FILENAME)
 
 
 if __name__ == "__main__":
