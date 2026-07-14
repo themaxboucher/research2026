@@ -1,10 +1,3 @@
-"""A *run* holds a shared source dataset plus one or more *generations*. Each
-generation is a subdirectory under `runs/<ts>/generations/<slug>/` holding its
-own model output (`files_generated.jsonl`), manual review notes
-(`review_notes.json`), a manifest describing how it was produced, and the
-dashboard's index caches. Generations in a run share the run's
-`repo_files_sample.jsonl` and differ only in prompt/model/config."""
-
 import json
 import re
 import subprocess
@@ -58,7 +51,7 @@ def write_manifest(
     config: dict,
 ) -> dict:
     """Record how a generation was produced so it can be told apart from others
-    in the run (models, code version, limits) long after the fact."""
+    in the run (models, code version, limits)."""
     manifest = {
         "label": label,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

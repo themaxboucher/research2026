@@ -11,12 +11,10 @@ from generations import GENERATED_FILENAME, list_generations
 from runs import require_latest_run_directory
 from storage import load_from_jsonl
 
-METRIC_NAMES = ("bleu4", "rougeL", "bertscore_f1")
-
 
 def normalize_comment(text: str) -> str:
-    """Comment text reduced to its content: per-line '#' markers and
-    indentation stripped, whitespace runs collapsed to single spaces."""
+    """Comment text reduced to its content. Per-line '#' markers and indentation 
+    are stripped. Evrything is joined into a single line with single spaces."""
     words = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -27,9 +25,7 @@ def normalize_comment(text: str) -> str:
 
 
 class CommentScorer:
-    """Computes the three metrics over batches of (prediction, reference)
-    pairs. Metrics are loaded lazily so runs with nothing left to score
-    don't pay for loading the BERTScore model."""
+    """Computes the three metrics over batches of (prediction, reference) pairs."""
 
     def __init__(self):
         self._bleu = None
@@ -37,19 +33,34 @@ class CommentScorer:
         self._bertscore = None
 
     def _load(self):
-        if self._bleu is None:
-            self._bleu = evaluate.load("bleu")
+        # Load the metric models if they haven't been loaded yet.
+        # We load them lazily so that runs with no results to score don't pay the cost of loading BERTScore.
+        if self._rouge is None or self._bertscore is None:
             self._rouge = evaluate.load("rouge")
             self._bertscore = evaluate.load("bertscore")
+
+    def _load_bleu(self):
+        # BLEU loads separately because corpus_bleu is needed at aggregate
+        # time even when there are no new pairs to score.
+        if self._bleu is None:
+            self._bleu = evaluate.load("bleu")
+
+    def corpus_bleu(self, predictions: list[str], references: list[str]) -> float:
+        """Standard (unsmoothed) corpus-level BLEU-4 over all pairs at once."""
+        self._load_bleu()
+        return self._bleu.compute(
+            predictions=predictions, references=references, max_order=4
+        )["bleu"]
 
     def score_pairs(
         self, predictions: list[str], references: list[str]
     ) -> list[dict]:
         self._load()
+        self._load_bleu()
 
-        # BLEU is corpus-level, so compute it one pair at a time. Sentence-level
-        # BLEU-4 needs smoothing, otherwise any pair without a matching 4-gram
-        # scores exactly 0.
+        # We use per comment pair BLEU 4 here (not corpus-level). 
+        # Smoothing is neeeded, otherwise any pair without a matching 
+        # 4-gram scores 0.
         bleu_scores = [
             self._bleu.compute(
                 predictions=[pred], references=[ref], max_order=4, smooth=True
@@ -99,34 +110,42 @@ def _write_records_atomically(records: list[dict], jsonl_path: Path) -> None:
     os.replace(temp_path, jsonl_path)
 
 
-def _report_aggregates(records: list[dict], generation_id: str) -> None:
-    """Mean of each metric per model over the generation, with the number of
-    scored and unusable (scores: null) results."""
+def _write_metrics(records: list[dict], gen_dir: Path, scorer: CommentScorer) -> None:
+    """Per-model aggregates saved to metrics.json in the generation directory.
+
+    BLEU is corpus-level, so it is recomputed from the normalized texts of all
+    usable results rather than averaged from the per-pair sentence scores.
+    ROUGE-L and BERTScore average cleanly per pair, so their stored scores are
+    reused. Models with no usable results are omitted."""
+    per_model_pairs = defaultdict(list)
     per_model_scores = defaultdict(lambda: defaultdict(list))
-    per_model_skipped = defaultdict(int)
     for record in records:
         for comment_generation in record.get("comment_generations") or []:
+            reference = normalize_comment(comment_generation.get("comment") or "")
             for result in comment_generation.get("results") or []:
-                model = result.get("model") or "<unknown>"
-                scores = result.get("scores")
-                if scores is None:
-                    per_model_skipped[model] += 1
+                if result.get("scores") is None:
                     continue
-                for metric in METRIC_NAMES:
-                    per_model_scores[model][metric].append(scores[metric])
+                model = result.get("model") or "<unknown>"
+                prediction = normalize_comment(result.get("comment_text") or "")
+                per_model_pairs[model].append((prediction, reference))
+                for metric in ("rougeL", "bertscore_f1"):
+                    per_model_scores[model][metric].append(result["scores"][metric])
 
-    print(f"\n{generation_id}")
-    for model in sorted(set(per_model_scores) | set(per_model_skipped)):
-        metrics = per_model_scores[model]
-        counts = f"n={len(metrics.get('bleu4', []))}"
-        if per_model_skipped[model]:
-            counts += f", unusable={per_model_skipped[model]}"
-        means = "  ".join(
-            f"{metric}={sum(values) / len(values):.4f}"
-            for metric, values in ((m, metrics[m]) for m in METRIC_NAMES)
-            if values
-        )
-        print(f"  {model} ({counts})  {means or 'no scored results'}")
+    metrics = {}
+    for model in sorted(per_model_pairs):
+        predictions = [prediction for prediction, _ in per_model_pairs[model]]
+        references = [reference for _, reference in per_model_pairs[model]]
+        scores = per_model_scores[model]
+        metrics[model] = {
+            "bleu4_corpus": scorer.corpus_bleu(predictions, references),
+            "rougeL": sum(scores["rougeL"]) / len(scores["rougeL"]),
+            "bertscore_f1": sum(scores["bertscore_f1"]) / len(scores["bertscore_f1"]),
+        }
+
+    metrics_path = gen_dir / "metrics.json"
+    metrics_path.write_text(
+        json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def evaluate_generation(gen_dir: Path, scorer: CommentScorer, force: bool) -> None:
@@ -143,11 +162,11 @@ def evaluate_generation(gen_dir: Path, scorer: CommentScorer, force: bool) -> No
 
     _write_records_atomically(records, gen_dir / f"{GENERATED_FILENAME}.jsonl")
     logging.info("Scored %d new results in %s", len(pending), gen_dir)
-    _report_aggregates(records, gen_dir.name)
+    _write_metrics(records, gen_dir, scorer)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "--run-dir",
         type=str,
