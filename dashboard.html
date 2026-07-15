@@ -1815,7 +1815,7 @@
         border: 1px solid var(--border-muted);
         border-radius: 8px;
         overflow: hidden;
-        margin-bottom: 12px;
+        margin: 0 20px 12px;
         background: var(--bg-subtle);
       }
       .gen-view .regen-result-head {
@@ -1917,7 +1917,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        margin: 14px 0 8px;
+        margin: 14px 20px 8px;
         font-size: 12px;
         color: var(--text-muted);
       }
@@ -3176,6 +3176,17 @@
               .join("") +
             `</tr>`;
         }
+        rowsHtml +=
+          `<tr class="bd-special"><td class="bd-row-label">(scopes regenerated)</td>` +
+          models
+            .map((model) => {
+              const count = metrics[model].scope_count;
+              return `<td class="bd-count${count ? "" : " zero"}">${
+                count == null ? "–" : count
+              }</td>`;
+            })
+            .join("") +
+          `</tr>`;
         const table = document.createElement("table");
         table.className = "breakdown-table";
         table.innerHTML =

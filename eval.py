@@ -220,6 +220,7 @@ def _write_regeneration_metrics(
         scopes = scope_counts[model]
         counts = target_counts[model]
         model_metrics = {
+            "scope_count": scopes["total"],
             "regen_failure_rate": scopes["failed"] / scopes["total"],
             "placement_recall": (
                 counts["hits"] / counts["targets"] if counts["targets"] else None
