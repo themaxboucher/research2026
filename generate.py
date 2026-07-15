@@ -166,6 +166,32 @@ def get_model_profile() -> tuple[ModelProfile, str]:
     return MODEL_PROFILES[profile_name], profile_name
 
 
+def _has_at_least_one_alpha_char(s: str) -> bool:
+    """Check if a string contains at least one alphabetic character."""
+    return any(char.isalpha() for char in s)
+
+
+def _is_visual_separator_comment(comment: str) -> bool:
+    """Check if a comment is a visual separator (e.g., a line of dashes or equals)."""
+    # A separator is a run of at least 5 identical punctuation characters,
+    # such as "-----", "=====", or "*****".
+    run_length = 0
+    previous_char = ""
+    for char in comment:
+        if char.isalnum() or char.isspace() or char == "#":
+            run_length = 0
+            previous_char = ""
+            continue
+        if char == previous_char:
+            run_length += 1
+        else:
+            run_length = 1
+            previous_char = char
+        if run_length >= 5:
+            return True
+    return False
+
+
 def _target_comments(source_file: dict) -> list[dict]:
     TARGET_COMMENT_TYPES = {"inline", "block"}
     TARGET_COMMENT_STATUSES = {"added"}
@@ -179,6 +205,8 @@ def _target_comments(source_file: dict) -> list[dict]:
         and comment.get("comment") is not None
         and not is_machine_directive_comment(comment["comment"])
         and comment.get("intent") in TARGET_INTENTS
+        and _has_at_least_one_alpha_char(comment.get("comment", ""))
+        and not _is_visual_separator_comment(comment.get("comment", ""))
     ]
 
 
@@ -295,7 +323,7 @@ def generate_comments_for_dataset(
     files_data = iter_from_jsonl(run_dir, SOURCE_FILENAME)
 
     model_profile, model_profile_name = get_model_profile()
-    
+
     concurrent_files = model_profile.concurrent_files
 
     label = label or default_label()
