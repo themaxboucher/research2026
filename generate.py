@@ -1,8 +1,10 @@
+import itertools
 import json
 import logging
 import os
 import re
 import subprocess
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, NamedTuple
@@ -126,6 +128,9 @@ def list_generations(run_dir: Path) -> list[dict]:
 class ModelProfile(NamedTuple):
     model_names: list[str]
     get_completion: Callable[[str, str], str]
+    # Files generated in parallel. Each file also fans out one request per
+    # model, so total in-flight requests ≈ concurrent_files × len(model_names).
+    concurrent_files: int
 
 
 MODEL_PROFILES = {
@@ -133,11 +138,9 @@ MODEL_PROFILES = {
         model_names=[
             "meta-llama/llama-3.1-8b-instruct",
             "qwen/qwen-2.5-7b-instruct",
-            "deepseek/deepseek-v4-pro",
-            "z-ai/glm-5.2",
-            "openai/gpt-5.6-luna-pro",
         ],
         get_completion=openrouter.get_completion,
+        concurrent_files=24,
     ),
     "cluster": ModelProfile(
         model_names=[
@@ -145,6 +148,9 @@ MODEL_PROFILES = {
             "Qwen/Qwen2.5-7B-Instruct",
         ],
         get_completion=transformers.get_completion,
+        # The GPU serializes forward passes; concurrent files would only
+        # interleave and slow each other down.
+        concurrent_files=1,
     ),
 }
 DEFAULT_MODEL_PROFILE = "local"
@@ -249,17 +255,35 @@ def _is_eligible_file(source_file: dict) -> bool:
     return True
 
 
+def _generate_outputs_for_file(
+    file_data: dict,
+    model_profile: ModelProfile,
+    approaches: list[str],
+) -> list[tuple[str, list[dict]]]:
+    """Run every requested approach on one file and return the records each
+    produced, keyed by output filename. Runs on a worker thread; writing the
+    records stays on the caller's thread so appends never interleave."""
+    # Imported here so each approach module can share this module's model
+    # profile and target-comment helpers without a circular import.
+    from location_generate import location_generate_for_file
+    from regenerate_generate import regenerate_generate_for_file
+
+    outputs: list[tuple[str, list[dict]]] = []
+    if "regenerate" in approaches:
+        scope_records = regenerate_generate_for_file(file_data, model_profile)
+        outputs.append((REGENERATE_FILENAME, scope_records))
+    if "location" in approaches:
+        location_record = location_generate_for_file(file_data, model_profile)
+        outputs.append((LOCATION_FILENAME, [location_record]))
+    return outputs
+
+
 def generate_comments_for_dataset(
     run_dir: Path,
     label: str | None = None,
     limit: int | None = None,
     approaches: list[str] | None = None,
 ) -> Path:
-    # Imported here so each approach module can share this module's model
-    # profile and target-comment helpers without a circular import.
-    from location_generate import location_generate_for_file
-    from regenerate_generate import regenerate_generate_for_file
-
     approaches = list(approaches or APPROACHES)
     unknown_approaches = set(approaches) - set(APPROACHES)
     if unknown_approaches:
@@ -271,6 +295,8 @@ def generate_comments_for_dataset(
     files_data = iter_from_jsonl(run_dir, SOURCE_FILENAME)
 
     model_profile, model_profile_name = get_model_profile()
+    
+    concurrent_files = model_profile.concurrent_files
 
     label = label or default_label()
     gen_dir = generation_dir(run_dir, label)
@@ -292,7 +318,11 @@ def generate_comments_for_dataset(
         label=label,
         model_profile=model_profile_name,
         model_names=model_profile.model_names,
-        config={"max_generate": limit, "approaches": approaches},
+        config={
+            "max_generate": limit,
+            "approaches": approaches,
+            "concurrent_files": concurrent_files,
+        },
     )
 
     if "location" in approaches:
@@ -300,31 +330,46 @@ def generate_comments_for_dataset(
     if "regenerate" in approaches:
         save_to_jsonl([], gen_dir, REGENERATE_FILENAME)
 
+    eligible_files = (
+        file_data for file_data in files_data if _is_eligible_file(file_data)
+    )
+    if limit is not None:
+        eligible_files = itertools.islice(eligible_files, limit)
+
+    # Files are generated concurrently but submitted through a window of at
+    # most `concurrent_files`, so the source JSONL streams instead of being
+    # held in memory. All appends happen here on the main thread.
     files_processed = 0
+    with ThreadPoolExecutor(max_workers=concurrent_files) as executor:
+        in_flight: dict[Future, str | None] = {}
 
-    for file_data in files_data:
-        if not _is_eligible_file(file_data):
-            continue
+        def submit_next_file() -> bool:
+            file_data = next(eligible_files, None)
+            if file_data is None:
+                return False
+            future = executor.submit(
+                _generate_outputs_for_file, file_data, model_profile, approaches
+            )
+            in_flight[future] = file_data.get("new_path")
+            return True
 
-        if limit is not None and files_processed >= limit:
-            break
+        for _ in range(concurrent_files):
+            if not submit_next_file():
+                break
 
-        filepath = file_data.get("new_path")
-        logging.info(
-            "Generating comments for %s (file %d/%s)",
-            filepath,
-            files_processed + 1,
-            limit if limit is not None else "?",
-        )
-
-        if "regenerate" in approaches:
-            scope_records = regenerate_generate_for_file(file_data, model_profile)
-            append_to_jsonl(scope_records, gen_dir, REGENERATE_FILENAME)
-
-        if "location" in approaches:
-            location_record = location_generate_for_file(file_data, model_profile)
-            append_to_jsonl([location_record], gen_dir, LOCATION_FILENAME)
-
-        files_processed += 1
+        while in_flight:
+            completed, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+            for future in completed:
+                filepath = in_flight.pop(future)
+                for output_filename, records in future.result():
+                    append_to_jsonl(records, gen_dir, output_filename)
+                files_processed += 1
+                logging.info(
+                    "Generated comments for %s (file %d/%s)",
+                    filepath,
+                    files_processed,
+                    limit if limit is not None else "?",
+                )
+                submit_next_file()
 
     return gen_dir
