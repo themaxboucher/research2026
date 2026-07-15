@@ -3,7 +3,6 @@ from collect import (
     finalize_collection,
     prepare_collection,
 )
-from generate import APPROACHES, generate_comments_for_dataset
 from report import generate_report
 from runs import resolve_run_directory
 from sample import SAMPLE_FILENAME
@@ -29,25 +28,6 @@ def parse_args():
         help="Merge the per-task output shards into single files",
     )
     parser.add_argument(
-        "--generate", action="store_true", help="Generate comments for collected data"
-    )
-    parser.add_argument(
-        "--generation",
-        type=str,
-        default=None,
-        help="Label for this generation, written under "
-        "runs/<run>/generations/<label>/ (defaults to a timestamp). Re-running a "
-        "label resumes it, skipping files already generated.",
-    )
-    parser.add_argument(
-        "--approaches",
-        type=str,
-        default=",".join(APPROACHES),
-        help="Comma-separated generation approaches to run: 'location' prompts "
-        "for a comment at a given spot, 'regenerate' has the model rewrite each "
-        "scope with comments added (default: both)",
-    )
-    parser.add_argument(
         "--report", action="store_true", help="Build dataset statistics and graphs"
     )
     parser.add_argument(
@@ -68,15 +48,15 @@ def parse_args():
         "--task-id",
         type=int,
         default=None,
-        help="This task's index in the job array. With --num-tasks, mines only "
-        "this task's share of repos into its own sharded files",
+        help="This task's index in the job array. Mines only this task's share "
+        "of the repos into its own sharded files",
     )
     array.add_argument(
         "--num-tasks",
         type=int,
         default=None,
-        help="Total number of tasks in the job array. With --task-id, splits "
-        "the repos evenly across tasks",
+        help="Total number of tasks in the job array. Splits the repos evenly "
+        "across tasks",
     )
     array.add_argument(
         "--repos-per-task",
@@ -102,31 +82,23 @@ def parse_args():
         default=0,
         help="Drop repos with fewer than this many contributors",
     )
-    limits.add_argument(
-        "--max-generate",
-        type=int,
-        default=None,
-        help="Limit files sent to the LLM for generation",
-    )
     parser.add_argument(
         "--smoke-test",
         action="store_true",
-        help="Tiny run: sets all limits to small values for a quick end-to-end test",
+        help="Tiny run: caps repos to a small number for a quick collection test",
     )
 
     args = parser.parse_args()
 
     no_stage_selected = not any(
-        (args.prepare, args.collect, args.finalize, args.generate, args.report)
+        (args.prepare, args.collect, args.finalize, args.report)
     )
     if no_stage_selected:
         args.collect = True
-        args.generate = True
         args.report = True
 
     if args.smoke_test:
         args.max_repos = 10
-        args.max_generate = 10
 
     return args
 
@@ -164,18 +136,6 @@ def main():
         )
     if args.finalize:
         finalize_collection(run_dir)
-    if args.generate:
-        approaches = [
-            approach.strip()
-            for approach in args.approaches.split(",")
-            if approach.strip()
-        ]
-        generate_comments_for_dataset(
-            run_dir,
-            label=args.generation,
-            limit=args.max_generate,
-            approaches=approaches,
-        )
     if args.report:
         generate_report(run_dir, SAMPLE_FILENAME)
 
