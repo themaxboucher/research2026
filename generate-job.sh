@@ -3,7 +3,7 @@
 #SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --gres=gpu:1
+#SBATCH --gpus-per-node=h100:1
 #SBATCH --output=logs/generate-comments-%A_%a.out
 #SBATCH --error=logs/generate-comments-%A_%a.err
 
