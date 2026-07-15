@@ -11,6 +11,7 @@ import argparse
 import logging
 from pathlib import Path
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -131,6 +132,7 @@ def parse_args():
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     args = parse_args()
 
     if args.run_dir:
@@ -169,7 +171,10 @@ def main():
             if approach.strip()
         ]
         generate_comments_for_dataset(
-            run_dir, label=args.generation, limit=args.max_generate, approaches=approaches
+            run_dir,
+            label=args.generation,
+            limit=args.max_generate,
+            approaches=approaches,
         )
     if args.report:
         generate_report(run_dir, SAMPLE_FILENAME)
