@@ -37,7 +37,7 @@ def parse_args():
         default=None,
         help="Label for this generation, written under "
         "runs/<run>/generations/<label>/ (defaults to a timestamp). Re-running a "
-        "label overwrites its output but keeps its review notes",
+        "label resumes it, skipping files already generated.",
     )
     parser.add_argument(
         "--approaches",

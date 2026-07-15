@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Callable, NamedTuple
 
 from llms import openrouter, transformers
-from storage import append_to_jsonl, iter_from_jsonl, save_to_jsonl
+from storage import (
+    append_to_jsonl,
+    drop_trailing_records,
+    iter_from_jsonl,
+    save_to_jsonl,
+    truncate_broken_tail,
+)
 from comments import is_machine_directive_comment
 
 
@@ -26,6 +32,23 @@ MANIFEST_FILENAME = "generation.json"
 LOCATION_FILENAME = "location_generated"
 REGENERATE_FILENAME = "regenerate_generated"
 NOTES_FILENAME = "review_notes.json"
+
+PROGRESS_FILENAME = "generation_progress"
+
+
+def _file_key(record: dict) -> str:
+    # `\x00` is a safe separator because it's not valid in a GitHub repo name, path, or commit hash.
+    return "\x00".join(
+        str(record.get(field))
+        for field in ("repo_name", "new_path", "commit_hash")
+    )
+
+
+def _completed_file_keys(gen_dir: Path) -> set[str]:
+    """File keys already committed to the progress log for this generation."""
+    if not (gen_dir / f"{PROGRESS_FILENAME}.jsonl").exists():
+        return set()
+    return {_file_key(record) for record in iter_from_jsonl(gen_dir, PROGRESS_FILENAME)}
 
 
 def _slugify(label: str) -> str:
@@ -68,10 +91,13 @@ def write_manifest(
     model_profile: str | None,
     model_names: list[str],
     config: dict,
+    created_at: str | None = None,
 ) -> dict:
     manifest = {
         "label": label,
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        # Preserve the original creation time when resuming an existing generation.
+        "created_at": created_at
+        or datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "model_profile": model_profile,
         "model_names": list(model_names),
         "git_commit": _git_commit(),
@@ -288,9 +314,6 @@ def _generate_outputs_for_file(
     model_profile: ModelProfile,
     approaches: list[str],
 ) -> list[tuple[str, list[dict]]]:
-    """Run every requested approach on one file and return the records each
-    produced, keyed by output filename. Runs on a worker thread; writing the
-    records stays on the caller's thread so appends never interleave."""
     # Imported here so each approach module can share this module's model
     # profile and target-comment helpers without a circular import.
     from location_generate import location_generate_for_file
@@ -328,17 +351,37 @@ def generate_comments_for_dataset(
 
     label = label or default_label()
     gen_dir = generation_dir(run_dir, label)
-    existing_output_filenames = [
+    output_filenames = [
         filename
-        for filename in (LOCATION_FILENAME, REGENERATE_FILENAME)
-        if (gen_dir / f"{filename}.jsonl").exists()
+        for filename, approach in (
+            (LOCATION_FILENAME, "location"),
+            (REGENERATE_FILENAME, "regenerate"),
+        )
+        if approach in approaches
     ]
-    if existing_output_filenames:
-        logging.warning(
-            "Generation %r already exists at %s; overwriting its output "
-            "(review notes are preserved).",
+
+    existing_manifest = read_manifest(gen_dir)
+    resuming = bool(existing_manifest) or any(
+        (gen_dir / f"{filename}.jsonl").exists() for filename in output_filenames
+    )
+
+    # Resume an interrupted run for this label rather than overwriting it
+    completed_keys: set[str] = set()
+    if resuming:
+        truncate_broken_tail(gen_dir, PROGRESS_FILENAME)
+        completed_keys = _completed_file_keys(gen_dir)
+        for filename in output_filenames:
+            truncate_broken_tail(gen_dir, filename)
+            drop_trailing_records(
+                gen_dir,
+                filename,
+                lambda record: _file_key(record) not in completed_keys,
+            )
+        logging.info(
+            "Resuming generation %r at %s (%d files already done).",
             label,
             gen_dir,
+            len(completed_keys),
         )
 
     write_manifest(
@@ -351,25 +394,36 @@ def generate_comments_for_dataset(
             "approaches": approaches,
             "concurrent_files": concurrent_files,
         },
+        created_at=existing_manifest.get("created_at") if resuming else None,
     )
 
-    if "location" in approaches:
-        save_to_jsonl([], gen_dir, LOCATION_FILENAME)
-    if "regenerate" in approaches:
-        save_to_jsonl([], gen_dir, REGENERATE_FILENAME)
+    # Create empty output files for a fresh run
+    for filename in output_filenames:
+        if not (gen_dir / f"{filename}.jsonl").exists():
+            save_to_jsonl([], gen_dir, filename)
 
     eligible_files = (
         file_data for file_data in files_data if _is_eligible_file(file_data)
     )
     if limit is not None:
         eligible_files = itertools.islice(eligible_files, limit)
+    # Filter out files already completed by an earlier run of this generation. This
+    # runs after `limit` so the target set matches a fresh run's first `limit`
+    # eligible files. We just don't redo the ones already finished.
+    eligible_files = (
+        file_data
+        for file_data in eligible_files
+        if _file_key(file_data) not in completed_keys
+    )
+
+    # Count files already done so progress logging reflects the whole run.
+    files_processed = len(completed_keys)
 
     # Files are generated concurrently but submitted through a window of at
     # most `concurrent_files`, so the source JSONL streams instead of being
     # held in memory. All appends happen here on the main thread.
-    files_processed = 0
     with ThreadPoolExecutor(max_workers=concurrent_files) as executor:
-        in_flight: dict[Future, str | None] = {}
+        in_flight: dict[Future, dict] = {}
 
         def submit_next_file() -> bool:
             file_data = next(eligible_files, None)
@@ -378,7 +432,11 @@ def generate_comments_for_dataset(
             future = executor.submit(
                 _generate_outputs_for_file, file_data, model_profile, approaches
             )
-            in_flight[future] = file_data.get("new_path")
+            in_flight[future] = {
+                "repo_name": file_data.get("repo_name"),
+                "new_path": file_data.get("new_path"),
+                "commit_hash": file_data.get("commit_hash"),
+            }
             return True
 
         for _ in range(concurrent_files):
@@ -388,13 +446,16 @@ def generate_comments_for_dataset(
         while in_flight:
             completed, _ = wait(in_flight, return_when=FIRST_COMPLETED)
             for future in completed:
-                filepath = in_flight.pop(future)
+                file_key = in_flight.pop(future)
                 for output_filename, records in future.result():
                     append_to_jsonl(records, gen_dir, output_filename)
+                # Log only after every approach's output is on disk, so a
+                # crash mid-write leaves this file uncommitted and it is redone.
+                append_to_jsonl([file_key], gen_dir, PROGRESS_FILENAME)
                 files_processed += 1
                 logging.info(
                     "Generated comments for %s (file %d/%s)",
-                    filepath,
+                    file_key["new_path"],
                     files_processed,
                     limit if limit is not None else "?",
                 )
