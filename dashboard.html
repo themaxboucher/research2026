@@ -625,70 +625,6 @@
         box-shadow: inset 3px 0 0 var(--accent);
       }
 
-      /* generations */
-      .gen-badge {
-        font-size: 10px;
-        font-weight: 600;
-        color: #bc8cff;
-        background: rgba(163, 113, 247, 0.15);
-        border-radius: 10px;
-        padding: 1px 6px;
-        flex-shrink: 0;
-      }
-      .filter-row label.gen-filter.active {
-        background: #8957e5;
-        border-color: #8957e5;
-        color: #fff;
-      }
-      /* Per-model generations under a comment's detail view. */
-      .model-gen-heading {
-        margin: 8px 24px 4px;
-        padding-top: 20px;
-        border-top: 1px solid var(--border);
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
-      }
-      /* Collapsible prompt shown once above a comment's model generations. */
-      .gen-prompt {
-        margin: 8px 24px 4px;
-      }
-      .gen-prompt summary {
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--text-muted);
-        user-select: none;
-      }
-      .gen-prompt summary:hover {
-        color: var(--text);
-      }
-      .gen-prompt pre {
-        margin: 8px 0 0;
-        padding: 14px 16px;
-        background: var(--bg-subtle);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-        font-size: 12px;
-        line-height: 1.6;
-        white-space: pre-wrap;
-        word-break: break-word;
-        max-height: 360px;
-        overflow: auto;
-      }
-      .gen-error-banner {
-        margin: 16px 24px;
-        padding: 16px;
-        background: rgba(248, 81, 73, 0.1);
-        border: 1px solid rgba(248, 81, 73, 0.4);
-        border-radius: 6px;
-        color: #f85149;
-        font-size: 13px;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
       /* diff2html tweaks */
       .d2h-wrapper {
         padding: 16px 24px;
@@ -1992,7 +1928,7 @@
       <h1>Research Dashboard</h1>
       <span class="meta" id="dataset-meta"></span>
       <div class="view-toggle" id="view-toggle" style="display: none">
-        <button data-view="data" class="active">Full data</button>
+        <button data-view="data" class="active">Dataset</button>
         <button data-view="intent">Intent</button>
         <button data-view="gen">Generations</button>
       </div>
@@ -2163,7 +2099,6 @@
         changeTypes: [],
         search: "",
         activeChangeTypes: new Set(),
-        genOnly: false,
         generation: null,
         generations: [],
         selectedIndex: null,
@@ -2217,7 +2152,8 @@
           if (gen.id === state.generation) option.selected = true;
           select.appendChild(option);
         }
-        select.style.display = "inline-block";
+        // Only the Generations view is scoped by generation; setView reveals the
+        // dropdown there. The Dataset and Intent views are generation-agnostic.
         select.addEventListener("change", () => onGenerationChange(select.value));
       }
 
@@ -2266,16 +2202,6 @@
         const container = document.getElementById("change-type-filters");
         container.innerHTML = "";
 
-        const genLabel = document.createElement("label");
-        genLabel.className = "gen-filter";
-        genLabel.innerHTML = `${iconSvg("zap")} generated only`;
-        genLabel.addEventListener("click", () => {
-          state.genOnly = !state.genOnly;
-          genLabel.classList.toggle("active", state.genOnly);
-          reloadRecords();
-        });
-        container.appendChild(genLabel);
-
         for (const type of state.changeTypes) {
           const label = document.createElement("label");
           label.className = "active";
@@ -2304,7 +2230,6 @@
         if (state.activeChangeTypes.size !== state.changeTypes.length) {
           params.set("types", Array.from(state.activeChangeTypes).join(","));
         }
-        if (state.genOnly) params.set("gen", "1");
         return params.toString();
       }
 
@@ -2326,9 +2251,7 @@
         if (state.loading) return;
         if (state.rows.length && state.rows.length >= state.total) return;
         state.loading = true;
-        const response = await fetch(
-          withGeneration(`/records?${recordsQuery(state.nextOffset)}`),
-        );
+        const response = await fetch(`/records?${recordsQuery(state.nextOffset)}`);
         const data = await response.json();
         state.total = data.total;
         state.nextOffset += data.rows.length;
@@ -2443,17 +2366,7 @@
           const statusPill = document.createElement("span");
           statusPill.className = "status-pill " + (c.status || "");
           statusPill.textContent = c.status || "";
-          if (c.generation_model_count != null) {
-            const gen = document.createElement("span");
-            gen.className = "gen-badge";
-            gen.innerHTML = `${iconSvg("zap")}${c.generation_model_count}`;
-            gen.title = `Generated by ${c.generation_model_count} model${
-              c.generation_model_count === 1 ? "" : "s"
-            }`;
-            meta.append(typeChip, statusPill, gen);
-          } else {
-            meta.append(typeChip, statusPill);
-          }
+          meta.append(typeChip, statusPill);
           const line = document.createElement("span");
           line.className = "rc-line";
           line.textContent =
@@ -2501,7 +2414,7 @@
         if (state.selectedIndex === index && state.currentRecord) return;
         state.selectedIndex = index;
         markSelection();
-        const response = await fetch(withGeneration(`/records/${index}`));
+        const response = await fetch(`/records/${index}`);
         state.currentRecord = await response.json();
       }
 
@@ -2792,7 +2705,7 @@
 
         const path = record.new_path || record.filename || "file.py";
 
-        // The human comment and its diff hunk, pulled from the file's full diff.
+        // The comment and its diff hunk, pulled from the file's full diff.
         appendCommentBlock(panel, {
           path,
           comment,
@@ -2801,9 +2714,6 @@
           hunkTitle: "Diff hunk",
           hunkMode: "human",
         });
-
-        // Below it, every model that generated a comment for this same target.
-        appendModelGenerations(panel, record, comment, path);
       }
 
       // Render a comment's text plus its diff hunk into `panel`. In "human" mode
@@ -2904,78 +2814,6 @@
           "td.d2h-code-line.d2h-ins",
         )) {
           codeCell.classList.add("cmt-hl");
-        }
-      }
-
-      // The prompt is built per comment target and is identical across the
-      // models run on it, so show it once for the whole generation group.
-      function appendGenerationPrompt(panel, generation) {
-        const promptText = generation.prompt || "";
-        if (!promptText) return;
-        const details = document.createElement("details");
-        details.className = "gen-prompt";
-        const summary = document.createElement("summary");
-        summary.textContent = "Prompt";
-        const pre = document.createElement("pre");
-        pre.textContent = promptText;
-        details.append(summary, pre);
-        panel.appendChild(details);
-      }
-
-      function appendModelGenerations(panel, record, comment, path) {
-        const generation = (record.comment_generations || []).find(
-          (g) =>
-            g.type === comment.type &&
-            g.anchor === comment.anchor &&
-            g.start_line === comment.start_line &&
-            g.end_line === comment.end_line,
-        );
-
-        const heading = document.createElement("div");
-        heading.className = "model-gen-heading";
-        heading.textContent = "Model generations";
-        panel.appendChild(heading);
-
-        const results = (generation && generation.results) || [];
-        if (!results.length) {
-          const note = document.createElement("div");
-          note.className = "empty-state";
-          note.textContent = "No model generations for this comment.";
-          panel.appendChild(note);
-          return;
-        }
-
-        appendGenerationPrompt(panel, generation);
-
-        const sorted = results
-          .slice()
-          .sort((a, b) => (a.model || "").localeCompare(b.model || ""));
-        for (const result of sorted) {
-          const modelName =
-            (result.model || "").split("/").pop() || "(unknown model)";
-          if (result.error || !result.comment_text) {
-            const block = document.createElement("div");
-            block.className = "comment-detail";
-            block.innerHTML = `<div class="cd-sub">${escapeHTML(modelName)}</div>`;
-            const banner = document.createElement("div");
-            banner.className = "gen-error-banner";
-            banner.innerHTML = `${iconSvg("alert-triangle")} ${escapeHTML(
-              result.error || "No comment generated.",
-            )}`;
-            block.appendChild(banner);
-            panel.appendChild(block);
-            continue;
-          }
-          appendCommentBlock(panel, {
-            path,
-            comment,
-            model: modelName,
-            commentText: result.comment_text,
-            diffText: result.diff || "",
-            hunkTitle: "Model diff hunk",
-            hunkMode: "model",
-            scores: result.scores,
-          });
         }
       }
 
@@ -3130,6 +2968,10 @@
         document.getElementById("gen-view").style.display = isGen ? "" : "none";
         document.getElementById("intent-view").style.display = isIntent ? "" : "none";
         document.getElementById("gen-search").style.display = isGen ? "" : "none";
+        // The generation dropdown only scopes the Generations view.
+        const genSelect = document.getElementById("generation-select");
+        genSelect.style.display =
+          isGen && state.generations.length ? "inline-block" : "none";
         // Review notes belong to the location sub-view; the save controls hide
         // while the (read-only) regenerate sub-view is active.
         for (const id of ["gen-review-count", "gen-save"]) {
