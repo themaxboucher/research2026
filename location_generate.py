@@ -267,7 +267,7 @@ def _comment_generation(
     diff = file_data["diff"]
     previous_source_code = file_data["previous_source_code"]
     filepath = file_data["new_path"]
-    intent = comment_data["intent"]
+    intent = comment_data.get("intent")
 
     if comment_data["status"] == "modified":
         previous_comments = extract_comments(
