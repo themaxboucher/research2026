@@ -1,5 +1,5 @@
 from github import search_repos
-from comments import get_comments_from_file, strip_comments_from_file
+from comments import get_comments_from_file
 from runs import run_directory_timestamp
 from storage import (
     append_to_jsonl,
@@ -119,12 +119,6 @@ def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
             error = None
 
             try:
-                source_code_without_comments = strip_comments_from_file(
-                    file.source_code
-                )
-                previous_source_code_without_comments = strip_comments_from_file(
-                    file.source_code_before
-                )
                 comments = get_comments_from_file(
                     file.source_code, file.source_code_before
                 )
@@ -134,8 +128,6 @@ def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
                     file.filename,
                     e,
                 )
-                source_code_without_comments = None
-                previous_source_code_without_comments = None
                 comments = None
                 error = str(e)
 
@@ -153,8 +145,6 @@ def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
                     "deleted_lines": file.deleted_lines,
                     "source_code": file.source_code,
                     "previous_source_code": file.source_code_before,
-                    "source_code_without_comments": source_code_without_comments,
-                    "previous_source_code_without_comments": previous_source_code_without_comments,
                     "comments": comments,
                     "nloc": file.nloc,
                     "complexity": file.complexity,
