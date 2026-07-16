@@ -6,6 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import evaluate
+from tqdm.auto import tqdm
 
 from generate import LOCATION_FILENAME, REGENERATE_FILENAME, list_generations
 from runs import require_latest_run_directory
@@ -53,34 +54,51 @@ class CommentScorer:
         )["bleu"]
 
     def score_pairs(
-        self, predictions: list[str], references: list[str]
+        self,
+        predictions: list[str],
+        references: list[str],
+        desc: str = "Scoring",
     ) -> list[dict]:
         self._load()
         self._load_bleu()
 
-        # We use per comment pair BLEU 4 here (not corpus-level). 
-        # Smoothing is neeeded, otherwise any pair without a matching 
-        # 4-gram scores 0.
-        bleu_scores = [
-            self._bleu.compute(
-                predictions=[pred], references=[ref], max_order=4, smooth=True
-            )["bleu"]
-            for pred, ref in zip(predictions, references)
-        ]
-        rouge_scores = self._rouge.compute(
-            predictions=predictions,
-            references=references,
-            rouge_types=["rougeL"],
-            use_aggregator=False,
-        )["rougeL"]
-        bertscore_f1 = self._bertscore.compute(
-            predictions=predictions, references=references, lang="en"
-        )["f1"]
+        # Score in chunks so a progress bar can advance as pairs are processed,
+        # rather than blocking on one opaque batch (BERTScore dominates the cost).
+        scores = []
+        batch_size = 64
+        with tqdm(total=len(predictions), desc=desc, unit="pair") as progress_bar:
+            for start in range(0, len(predictions), batch_size):
+                pred_batch = predictions[start : start + batch_size]
+                ref_batch = references[start : start + batch_size]
 
-        return [
-            {"bleu4": bleu, "rougeL": rouge, "bertscore_f1": bert}
-            for bleu, rouge, bert in zip(bleu_scores, rouge_scores, bertscore_f1)
-        ]
+                # We use per comment pair BLEU 4 here (not corpus-level).
+                # Smoothing is neeeded, otherwise any pair without a matching
+                # 4-gram scores 0.
+                bleu_scores = [
+                    self._bleu.compute(
+                        predictions=[pred], references=[ref], max_order=4, smooth=True
+                    )["bleu"]
+                    for pred, ref in zip(pred_batch, ref_batch)
+                ]
+                rouge_scores = self._rouge.compute(
+                    predictions=pred_batch,
+                    references=ref_batch,
+                    rouge_types=["rougeL"],
+                    use_aggregator=False,
+                )["rougeL"]
+                bertscore_f1 = self._bertscore.compute(
+                    predictions=pred_batch, references=ref_batch, lang="en"
+                )["f1"]
+
+                scores.extend(
+                    {"bleu4": bleu, "rougeL": rouge, "bertscore_f1": bert}
+                    for bleu, rouge, bert in zip(
+                        bleu_scores, rouge_scores, bertscore_f1
+                    )
+                )
+                progress_bar.update(len(pred_batch))
+
+        return scores
 
 
 def _collect_unscored(records: list[dict], force: bool) -> list[tuple[dict, str, str]]:
@@ -256,8 +274,9 @@ def _evaluate_location_generation(
     if pending:
         predictions = [prediction for _, prediction, _ in pending]
         references = [reference for _, _, reference in pending]
+        desc = f"Scoring {gen_dir.name}"
         for (result, _, _), scores in zip(
-            pending, scorer.score_pairs(predictions, references)
+            pending, scorer.score_pairs(predictions, references, desc=desc)
         ):
             result["scores"] = scores
 
@@ -273,8 +292,9 @@ def _evaluate_regeneration(gen_dir: Path, scorer: CommentScorer, force: bool) ->
     if pending:
         predictions = [prediction for _, prediction, _ in pending]
         references = [reference for _, _, reference in pending]
+        desc = f"Scoring {gen_dir.name} (regenerate)"
         for (extraction, _, _), scores in zip(
-            pending, scorer.score_pairs(predictions, references)
+            pending, scorer.score_pairs(predictions, references, desc=desc)
         ):
             extraction["scores"] = scores
 
@@ -326,7 +346,7 @@ def main():
         raise SystemExit(f"No generations with output found in {run_dir}")
 
     scorer = CommentScorer()
-    for generation in generations:
+    for generation in tqdm(generations, desc="Generations", unit="gen"):
         evaluate_generation(generation["dir"], scorer, force=args.force)
 
 
