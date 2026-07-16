@@ -18,14 +18,14 @@ import tokenize
 from pydriller import Repository
 from datetime import datetime
 
-# Knowledge cutoff dates
-# Gemini 3.1 Pro (https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-pro): January 2025
-# GPT-5.5 (https://developers.openai.com/api/docs/models/gpt-5.5): December 1st, 2025
-# Llama-3.1-8b (https://huggingface.co/meta-llama/Llama-3.1-8B): December 2023
-# Qwen...
+# === LLM knowledge cutoffs ===
+# GPT-5.6 Luna (https://developers.openai.com/api/docs/models/gpt-5.6-luna): Feb 16, 2026
+# Llama 3.1 8b (https://huggingface.co/meta-llama/Llama-3.1-8B): December 2023
+# Qwen 2.5 7b (https://huggingface.co/Qwen/Qwen2.5-7B): Unknown, but we know the model was released in Sep 2024
+
+CUTOFF_DATE = "2026-02-17" # After GPT-5.6 Luna's knowledge cutoff, to avoid data leakage
 
 REPO_LANGUAGE = "Python"
-CUTOFF_DATE = "2025-12-02"
 DEFAULT_MINING_WORKERS = 16
 
 DATA_FILENAME = "repo_files"
