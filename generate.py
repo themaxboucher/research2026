@@ -461,4 +461,10 @@ def generate_comments_for_dataset(
                 )
                 submit_next_file()
 
+    logging.info(
+        "Finished generation %r at %s (%d files generated).",
+        label,
+        gen_dir,
+        files_processed,
+    )
     return gen_dir
