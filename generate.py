@@ -1,3 +1,4 @@
+import argparse
 import itertools
 import json
 import logging
@@ -10,10 +11,12 @@ from pathlib import Path
 from typing import Callable, NamedTuple
 
 from llms import openrouter, transformers
+from runs import require_latest_run_directory
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
     iter_from_jsonl,
+    merge_jsonl_shards,
     save_to_jsonl,
     truncate_broken_tail,
 )
@@ -44,11 +47,27 @@ def _file_key(record: dict) -> str:
     )
 
 
-def _completed_file_keys(gen_dir: Path) -> set[str]:
+def _completed_file_keys(gen_dir: Path, progress_filename: str) -> set[str]:
     """File keys already committed to the progress log for this generation."""
-    if not (gen_dir / f"{PROGRESS_FILENAME}.jsonl").exists():
+    if not (gen_dir / f"{progress_filename}.jsonl").exists():
         return set()
-    return {_file_key(record) for record in iter_from_jsonl(gen_dir, PROGRESS_FILENAME)}
+    return {_file_key(record) for record in iter_from_jsonl(gen_dir, progress_filename)}
+
+
+def _shard_suffix(task_id: int, num_tasks: int) -> str:
+    digit_width = max(len(str(num_tasks - 1)), 1)
+    return f"{task_id:0{digit_width}d}"
+
+
+def _sharded(filename: str, suffix: str | None) -> str:
+    return f"{filename}.{suffix}" if suffix is not None else filename
+
+
+def _has_shards(gen_dir: Path) -> bool:
+    for filename in (LOCATION_FILENAME, REGENERATE_FILENAME, PROGRESS_FILENAME):
+        if any(gen_dir.glob(f"{filename}.*.jsonl")):
+            return True
+    return False
 
 
 def _slugify(label: str) -> str:
@@ -330,12 +349,7 @@ def _generate_outputs_for_file(
     return outputs
 
 
-def generate_comments_for_dataset(
-    run_dir: Path,
-    label: str | None = None,
-    limit: int | None = None,
-    approaches: list[str] | None = None,
-) -> Path:
+def _validate_approaches(approaches: list[str] | None) -> list[str]:
     approaches = list(approaches or APPROACHES)
     unknown_approaches = set(approaches) - set(APPROACHES)
     if unknown_approaches:
@@ -343,17 +357,12 @@ def generate_comments_for_dataset(
             f"Unknown approaches: {', '.join(sorted(unknown_approaches))}. "
             f"Expected any of: {', '.join(APPROACHES)}"
         )
+    return approaches
 
-    files_data = iter_from_jsonl(run_dir, SOURCE_FILENAME)
 
-    model_profile, model_profile_name = get_model_profile()
-
-    concurrent_files = model_profile.concurrent_files
-
-    label = label or default_label()
-    gen_dir = generation_dir(run_dir, label)
-    output_filenames = [
-        filename
+def _output_filenames(approaches: list[str], suffix: str | None) -> list[str]:
+    return [
+        _sharded(filename, suffix)
         for filename, approach in (
             (LOCATION_FILENAME, "location"),
             (REGENERATE_FILENAME, "regenerate"),
@@ -361,23 +370,35 @@ def generate_comments_for_dataset(
         if approach in approaches
     ]
 
-    existing_manifest = read_manifest(gen_dir)
-    resuming = bool(existing_manifest) or any(
-        (gen_dir / f"{filename}.jsonl").exists() for filename in output_filenames
-    )
+
+def _run_generation(
+    run_dir: Path,
+    gen_dir: Path,
+    label: str,
+    model_profile: ModelProfile,
+    approaches: list[str],
+    limit: int | None,
+    task_id: int | None = None,
+    num_tasks: int | None = None,
+) -> Path:
+    in_jobs_array = task_id is not None and num_tasks is not None
+    suffix = _shard_suffix(task_id, num_tasks) if in_jobs_array else None
+    progress_filename = _sharded(PROGRESS_FILENAME, suffix)
+    output_filenames = _output_filenames(approaches, suffix)
+
+    concurrent_files = model_profile.concurrent_files
 
     # Resume an interrupted run for this label rather than overwriting it
-    completed_keys: set[str] = set()
-    if resuming:
-        truncate_broken_tail(gen_dir, PROGRESS_FILENAME)
-        completed_keys = _completed_file_keys(gen_dir)
-        for filename in output_filenames:
-            truncate_broken_tail(gen_dir, filename)
-            drop_trailing_records(
-                gen_dir,
-                filename,
-                lambda record: _file_key(record) not in completed_keys,
-            )
+    truncate_broken_tail(gen_dir, progress_filename)
+    completed_keys = _completed_file_keys(gen_dir, progress_filename)
+    for filename in output_filenames:
+        truncate_broken_tail(gen_dir, filename)
+        drop_trailing_records(
+            gen_dir,
+            filename,
+            lambda record: _file_key(record) not in completed_keys,
+        )
+    if completed_keys:
         logging.info(
             "Resuming generation %r at %s (%d files already done).",
             label,
@@ -385,29 +406,22 @@ def generate_comments_for_dataset(
             len(completed_keys),
         )
 
-    write_manifest(
-        gen_dir,
-        label=label,
-        model_profile=model_profile_name,
-        model_names=model_profile.model_names,
-        config={
-            "max_generate": limit,
-            "approaches": approaches,
-            "concurrent_files": concurrent_files,
-        },
-        created_at=existing_manifest.get("created_at") if resuming else None,
-    )
-
     # Create empty output files for a fresh run
     for filename in output_filenames:
         if not (gen_dir / f"{filename}.jsonl").exists():
             save_to_jsonl([], gen_dir, filename)
 
+    files_data = iter_from_jsonl(run_dir, SOURCE_FILENAME)
     eligible_files = (
         file_data for file_data in files_data if _is_eligible_file(file_data)
     )
     if limit is not None:
         eligible_files = itertools.islice(eligible_files, limit)
+    # Every array task streams the same source and applies the same filter and
+    # limit, so striding over the eligible files deterministically partitions
+    # them across tasks (mirrors collection's repos[task_id::num_tasks]).
+    if in_jobs_array:
+        eligible_files = itertools.islice(eligible_files, task_id, None, num_tasks)
     # Filter out files already completed by an earlier run of this generation. This
     # runs after `limit` so the target set matches a fresh run's first `limit`
     # eligible files. We just don't redo the ones already finished.
@@ -448,18 +462,37 @@ def generate_comments_for_dataset(
             completed, _ = wait(in_flight, return_when=FIRST_COMPLETED)
             for future in completed:
                 file_key = in_flight.pop(future)
-                for output_filename, records in future.result():
-                    append_to_jsonl(records, gen_dir, output_filename)
-                # Log only after every approach's output is on disk, so a
-                # crash mid-write leaves this file uncommitted and it is redone.
-                append_to_jsonl([file_key], gen_dir, PROGRESS_FILENAME)
+                try:
+                    outputs = future.result()
+                except Exception as error:
+                    # A failed file is recorded as done (with its error) so one
+                    # pathological input can't wedge the task or spin forever
+                    # on resume; it just produces no output records.
+                    logging.warning(
+                        "Generation failed for %s: %s", file_key["new_path"], error
+                    )
+                    append_to_jsonl(
+                        [{**file_key, "error": str(error)}],
+                        gen_dir,
+                        progress_filename,
+                    )
+                else:
+                    for output_filename, records in outputs:
+                        append_to_jsonl(
+                            records, gen_dir, _sharded(output_filename, suffix)
+                        )
+                    # Log only after every approach's output is on disk, so a
+                    # crash mid-write leaves this file uncommitted and it is redone.
+                    append_to_jsonl(
+                        [{**file_key, "error": None}], gen_dir, progress_filename
+                    )
+                    logging.info(
+                        "Generated comments for %s (file %d/%s)",
+                        file_key["new_path"],
+                        files_processed + 1,
+                        limit if limit is not None and not in_jobs_array else "?",
+                    )
                 files_processed += 1
-                logging.info(
-                    "Generated comments for %s (file %d/%s)",
-                    file_key["new_path"],
-                    files_processed,
-                    limit if limit is not None else "?",
-                )
                 submit_next_file()
 
     logging.info(
@@ -469,3 +502,292 @@ def generate_comments_for_dataset(
         files_processed,
     )
     return gen_dir
+
+
+def generate_comments_for_dataset(
+    run_dir: Path,
+    label: str | None = None,
+    limit: int | None = None,
+    approaches: list[str] | None = None,
+) -> Path:
+    """Generate on a single machine, writing unsharded output files."""
+    approaches = _validate_approaches(approaches)
+
+    model_profile, model_profile_name = get_model_profile()
+
+    label = label or default_label()
+    gen_dir = generation_dir(run_dir, label)
+
+    existing_manifest = read_manifest(gen_dir)
+    if (existing_manifest.get("config") or {}).get("num_tasks") is not None or (
+        _has_shards(gen_dir)
+    ):
+        raise RuntimeError(
+            f"Generation {label!r} was produced by a job array; resume it with "
+            "generate-submit.sh or choose a new label"
+        )
+
+    write_manifest(
+        gen_dir,
+        label=label,
+        model_profile=model_profile_name,
+        model_names=model_profile.model_names,
+        config={
+            "max_generate": limit,
+            "approaches": approaches,
+            "concurrent_files": model_profile.concurrent_files,
+        },
+        created_at=existing_manifest.get("created_at"),
+    )
+
+    return _run_generation(
+        run_dir, gen_dir, label, model_profile, approaches, limit
+    )
+
+
+def prepare_generation(
+    run_dir: Path,
+    label: str | None,
+    num_tasks: int | None,
+    limit: int | None,
+    approaches: list[str] | None,
+) -> tuple[str, int]:
+    approaches = _validate_approaches(approaches)
+
+    source_path = run_dir / f"{SOURCE_FILENAME}.jsonl"
+    if not source_path.exists():
+        raise FileNotFoundError(
+            f"No sample file at {source_path}. Run sample.py on this run first."
+        )
+
+    model_profile, model_profile_name = get_model_profile()
+
+    label = label or default_label()
+    gen_dir = generation_dir(run_dir, label)
+    existing_manifest = read_manifest(gen_dir)
+
+    if existing_manifest:
+        existing_config = existing_manifest.get("config") or {}
+        existing_num_tasks = existing_config.get("num_tasks")
+        if existing_num_tasks is None:
+            raise RuntimeError(
+                f"Generation {label!r} was generated without a job array; "
+                "choose a new label"
+            )
+        if num_tasks is not None and num_tasks != existing_num_tasks:
+            raise ValueError(
+                f"Generation {label!r} was created with --num-tasks "
+                f"{existing_num_tasks}; resuming with {num_tasks} would "
+                "reshuffle which task owns which file"
+            )
+        num_tasks = existing_num_tasks
+        approaches = existing_config.get("approaches") or approaches
+        limit = existing_config.get("max_generate")
+
+    if num_tasks is None:
+        raise ValueError("--num-tasks is required for a new array generation")
+    if num_tasks < 1:
+        raise ValueError(f"--num-tasks must be >= 1, got {num_tasks}")
+
+    write_manifest(
+        gen_dir,
+        label=label,
+        model_profile=model_profile_name,
+        model_names=model_profile.model_names,
+        config={
+            "max_generate": limit,
+            "approaches": approaches,
+            "num_tasks": num_tasks,
+        },
+        created_at=existing_manifest.get("created_at"),
+    )
+    return label, num_tasks
+
+
+def generate_comments_for_task(run_dir: Path, label: str, task_id: int) -> Path:
+    """Generate one array task's stride of the eligible files, into shard files."""
+    gen_dir = generation_dir(run_dir, label)
+    manifest = read_manifest(gen_dir)
+    if not manifest:
+        raise RuntimeError(
+            f"No manifest at {gen_dir / MANIFEST_FILENAME}; submit the array "
+            "through generate-submit.sh so the manifest is written first"
+        )
+
+    config = manifest.get("config") or {}
+    num_tasks = config.get("num_tasks")
+    if num_tasks is None:
+        raise RuntimeError(
+            f"Generation {label!r} was not prepared for a job array; "
+            "choose a new label"
+        )
+    if not 0 <= task_id < num_tasks:
+        raise ValueError(
+            f"--task-id {task_id} is out of range for --num-tasks {num_tasks}"
+        )
+
+    model_profile, model_profile_name = get_model_profile()
+    manifest_profile = manifest.get("model_profile")
+    if manifest_profile is not None and manifest_profile != model_profile_name:
+        raise RuntimeError(
+            f"Generation {label!r} was prepared with MODEL_PROFILE="
+            f"{manifest_profile!r} but this task is running with "
+            f"{model_profile_name!r}"
+        )
+
+    return _run_generation(
+        run_dir,
+        gen_dir,
+        label,
+        model_profile,
+        approaches=config.get("approaches") or list(APPROACHES),
+        limit=config.get("max_generate"),
+        task_id=task_id,
+        num_tasks=num_tasks,
+    )
+
+
+def finalize_generation(run_dir: Path, label: str) -> Path:
+    """Merge the per-task shard files into the unsharded files readers expect."""
+    gen_dir = generation_dir(run_dir, label)
+
+    for filename in (LOCATION_FILENAME, REGENERATE_FILENAME, PROGRESS_FILENAME):
+        # Skip filenames with no shards so an approach that never ran doesn't
+        # get an empty merged file (which readers would take as real output).
+        if not any(gen_dir.glob(f"{filename}.*.jsonl")):
+            continue
+        shard_count = merge_jsonl_shards(gen_dir, filename)
+        logging.info("Merged %d %s shards", shard_count, filename)
+
+    completed_files = 0
+    failed_files = 0
+    if (gen_dir / f"{PROGRESS_FILENAME}.jsonl").exists():
+        for record in iter_from_jsonl(gen_dir, PROGRESS_FILENAME):
+            if record.get("error"):
+                failed_files += 1
+            else:
+                completed_files += 1
+    logging.info(
+        "Finalized generation %r: %d files generated, %d failed",
+        label,
+        completed_files,
+        failed_files,
+    )
+    return gen_dir
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Generate LLM comments for a collected, sampled run. With no "
+        "stage flag, generates on a single machine; --prepare/--finalize and "
+        "--task-id drive the SLURM job array (see generate-submit.sh)."
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="Run directory to generate for (defaults to the latest run)",
+    )
+    parser.add_argument(
+        "--generation",
+        type=str,
+        default=None,
+        help="Label for this generation, written under "
+        "runs/<run>/generations/<label>/ (defaults to a timestamp). Re-running a "
+        "label resumes it, skipping files already generated.",
+    )
+    parser.add_argument(
+        "--approaches",
+        type=str,
+        default=",".join(APPROACHES),
+        help="Comma-separated generation approaches to run: 'location' prompts "
+        "for a comment at a given spot, 'regenerate' has the model rewrite each "
+        "scope with comments added (default: both)",
+    )
+    parser.add_argument(
+        "--max-generate",
+        type=int,
+        default=None,
+        help="Limit files sent to the LLM for generation",
+    )
+
+    stages = parser.add_argument_group("job array (HPC partitioning)")
+    stages.add_argument(
+        "--prepare",
+        action="store_true",
+        help="Write the generation manifest for a job array and print RUN_DIR, "
+        "GENERATION and NUM_TASKS for generate-submit.sh",
+    )
+    stages.add_argument(
+        "--finalize",
+        action="store_true",
+        help="Merge a generation's per-task output shards into single files",
+    )
+    stages.add_argument(
+        "--task-id",
+        type=int,
+        default=None,
+        help="This task's index in the job array. Generates only this task's "
+        "share of the eligible files into its own sharded files",
+    )
+    stages.add_argument(
+        "--num-tasks",
+        type=int,
+        default=None,
+        help="Total number of tasks in the job array; --prepare records it in "
+        "the manifest so every task strides the same way",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    args = _parse_args()
+
+    run_dir = (
+        Path(args.run_dir) if args.run_dir else require_latest_run_directory()
+    )
+    logging.info("Using run directory: %s", run_dir)
+
+    approaches = [
+        approach.strip() for approach in args.approaches.split(",") if approach.strip()
+    ]
+
+    if args.prepare:
+        label, num_tasks = prepare_generation(
+            run_dir,
+            label=args.generation,
+            num_tasks=args.num_tasks,
+            limit=args.max_generate,
+            approaches=approaches,
+        )
+        # generate-submit.sh uses these prints to parse the array parameters
+        print(f"RUN_DIR={run_dir}")
+        print(f"GENERATION={label}")
+        print(f"NUM_TASKS={num_tasks}")
+        return
+
+    if args.finalize:
+        if not args.generation:
+            raise SystemExit("--finalize requires --generation")
+        finalize_generation(run_dir, args.generation)
+        return
+
+    if args.task_id is not None:
+        if not args.generation:
+            raise SystemExit("--generation is required when generating with --task-id")
+        generate_comments_for_task(
+            run_dir, label=args.generation, task_id=args.task_id
+        )
+        return
+
+    generate_comments_for_dataset(
+        run_dir,
+        label=args.generation,
+        limit=args.max_generate,
+        approaches=approaches,
+    )
+
+
+if __name__ == "__main__":
+    main()

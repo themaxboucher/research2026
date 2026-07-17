@@ -6,27 +6,30 @@ from functools import lru_cache
 
 import httpx
 from dotenv import load_dotenv
-from openrouter import errors
 
 load_dotenv()
 
 MAX_ATTEMPTS = 5
 INITIAL_RETRY_DELAY_SECONDS = 2.0
 
-# Rate limits, provider overload, server-side failures, and transport errors
-# are worth retrying. Client errors (bad request, auth, payment) are not —
-# they would fail identically on every attempt.
-RETRYABLE_ERRORS = (
-    errors.TooManyRequestsResponseError,
-    errors.ProviderOverloadedResponseError,
-    errors.InternalServerResponseError,
-    errors.BadGatewayResponseError,
-    errors.ServiceUnavailableResponseError,
-    errors.RequestTimeoutResponseError,
-    errors.EdgeNetworkTimeoutResponseError,
-    errors.NoResponseError,
-    httpx.HTTPError,
-)
+
+@lru_cache(maxsize=1)
+def _retryable_errors() -> tuple[type[Exception], ...]:
+    # Imported lazily so this module and everything that imports it loads on hosts 
+    # without the `openrouter` package installed.
+    from openrouter import errors
+
+    return (
+        errors.TooManyRequestsResponseError,
+        errors.ProviderOverloadedResponseError,
+        errors.InternalServerResponseError,
+        errors.BadGatewayResponseError,
+        errors.ServiceUnavailableResponseError,
+        errors.RequestTimeoutResponseError,
+        errors.EdgeNetworkTimeoutResponseError,
+        errors.NoResponseError,
+        httpx.HTTPError,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -44,7 +47,7 @@ def get_completion(model_name: str, prompt: str) -> str:
                 messages=[{"role": "user", "content": prompt}],
             )
             return response.choices[0].message.content
-        except RETRYABLE_ERRORS as error:
+        except _retryable_errors() as error:
             if attempt == MAX_ATTEMPTS:
                 raise
             # Full jitter so concurrent workers don't retry in lockstep.
