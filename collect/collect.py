@@ -1,6 +1,6 @@
-from github import search_repos
-from comments import get_comments_from_file
-from runs import run_directory_timestamp
+from collect.github import search_repos
+from collect.dataset import dataset_directory_timestamp, resolve_dataset_directory
+import argparse
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
@@ -14,7 +14,6 @@ import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
-import tokenize
 from pydriller import Repository
 from datetime import datetime
 
@@ -28,7 +27,7 @@ CUTOFF_DATE = "2026-02-17" # After GPT-5.6 Luna's knowledge cutoff, to avoid dat
 REPO_LANGUAGE = "Python"
 DEFAULT_MINING_WORKERS = 16
 
-DATA_FILENAME = "repo_files"
+DATA_FILENAME = "dataset"
 REPOS_CACHE_FILENAME = "repos_cache"
 MINNED_REPOS_FILENAME = "mined_repos"
 
@@ -103,59 +102,6 @@ def _sort_repos_by_size(repos: list[dict]) -> list[dict]:
     return sorted(repos, key=lambda repo: repo["size"])
 
 
-def _collect_repo_files(repo: Repository, repo_full_name: str) -> list[dict]:
-    repo_files = []
-
-    for commit in repo.traverse_commits():
-        for file in commit.modified_files:
-            is_python_file = file.filename.endswith(".py")
-            is_rename_change = file.change_type.name == "RENAME"
-
-            if not is_python_file:
-                continue
-            if is_rename_change:
-                continue
-
-            error = None
-
-            try:
-                comments = get_comments_from_file(
-                    file.source_code, file.source_code_before
-                )
-            except (tokenize.TokenError, IndentationError, SyntaxError) as e:
-                logging.warning(
-                    "Could not process file %s: tokenization failed: %s",
-                    file.filename,
-                    e,
-                )
-                comments = None
-                error = str(e)
-
-            repo_files.append(
-                {
-                    "repo_name": repo_full_name,
-                    "commit_hash": commit.hash,
-                    "commit_message": commit.msg,
-                    "filename": file.filename,
-                    "new_path": file.new_path,
-                    "change_type": file.change_type.name,
-                    "diff": file.diff,
-                    "diff_parsed": file.diff_parsed,
-                    "added_lines": file.added_lines,
-                    "deleted_lines": file.deleted_lines,
-                    "source_code": file.source_code,
-                    "previous_source_code": file.source_code_before,
-                    "comments": comments,
-                    "nloc": file.nloc,
-                    "complexity": file.complexity,
-                    "token_count": file.token_count,
-                    "error": error,
-                }
-            )
-
-    return repo_files
-
-
 def _mine_repo(
     repo_url: str, repo_full_name: str, branch: str, since: str, to: datetime
 ) -> list[dict]:
@@ -170,7 +116,31 @@ def _mine_repo(
         only_modifications_with_file_types=[".py"],
     )
 
-    return _collect_repo_files(repo, repo_full_name)
+    repo_files = []
+
+    for commit in repo.traverse_commits():
+        for file in commit.modified_files:
+            repo_files.append(
+                {
+                    "repo_name": repo_full_name,
+                    "commit_hash": commit.hash,
+                    "commit_message": commit.msg,
+                    "filename": file.filename,
+                    "new_path": file.new_path,
+                    "change_type": file.change_type.name,
+                    "diff": file.diff,
+                    "diff_parsed": file.diff_parsed,
+                    "added_lines": file.added_lines,
+                    "deleted_lines": file.deleted_lines,
+                    "source_code": file.source_code,
+                    "previous_source_code": file.source_code_before,
+                    "nloc": file.nloc,
+                    "complexity": file.complexity,
+                    "token_count": file.token_count,
+                }
+            )
+
+    return repo_files
 
 
 def _mine_and_persist_repo(
@@ -251,7 +221,7 @@ def collect_dataset(
         data_filename, mined_filename = DATA_FILENAME, MINNED_REPOS_FILENAME
 
     all_repos = _get_repos(repo_min_stars, max_repos, run_dir)
-    mining_end = run_directory_timestamp(run_dir)
+    mining_end = dataset_directory_timestamp(run_dir)
 
     sorted_repos = _sort_repos_by_size(all_repos)
     if in_jobs_array:
@@ -294,3 +264,120 @@ def collect_dataset(
         )
         for completed_future in progress_bar:
             completed_future.result()
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--prepare",
+        action="store_true",
+        help="Search GitHub once, cache the repo list, and print RUN_DIR and "
+        "NUM_TASKS for the job array",
+    )
+    parser.add_argument(
+        "--collect", action="store_true", help="Collect data from GitHub"
+    )
+    parser.add_argument(
+        "--finalize",
+        action="store_true",
+        help="Merge the per-task output shards into single files",
+    )
+    parser.add_argument(
+        "--new-run",
+        action="store_true",
+        help="Start a fresh timestamped run directory instead of using the latest",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=str,
+        default=None,
+        help="Use this exact run directory instead of picking one "
+        "automatically, so every array task shares one run",
+    )
+
+    array = parser.add_argument_group("job array (HPC partitioning)")
+    array.add_argument(
+        "--task-id",
+        type=int,
+        default=None,
+        help="This task's index in the job array. Mines only this task's share "
+        "of the repos into its own sharded files",
+    )
+    array.add_argument(
+        "--num-tasks",
+        type=int,
+        default=None,
+        help="Total number of tasks in the job array. Splits the repos evenly "
+        "across tasks",
+    )
+    array.add_argument(
+        "--repos-per-task",
+        type=int,
+        default=10,
+        help="Repos per array task; --prepare uses this to decide how many "
+        "tasks to create",
+    )
+
+    limits = parser.add_argument_group("limits (for testing on smaller batches)")
+    limits.add_argument(
+        "--max-repos", type=int, default=1000, help="Limit number of repos processed"
+    )
+    limits.add_argument(
+        "--repo-min-stars",
+        type=int,
+        default=0,
+        help="Only include repos with at least this many stars",
+    )
+    limits.add_argument(
+        "--repo-min-contributors",
+        type=int,
+        default=0,
+        help="Drop repos with fewer than this many contributors",
+    )
+
+    args = parser.parse_args()
+
+    no_stage_selected = not any((args.prepare, args.collect, args.finalize))
+    if no_stage_selected:
+        args.collect = True
+
+    return args
+
+
+def main():
+    logging.basicConfig(level=logging.INFO)
+    args = _parse_args()
+
+    if args.run_dir:
+        run_dir = Path(args.run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        run_dir = resolve_dataset_directory(create_new_run=(args.new_run or args.prepare))
+    logging.info("Using run directory: %s", run_dir)
+
+    if args.prepare:
+        num_tasks = prepare_collection(
+            run_dir,
+            max_repos=args.max_repos,
+            repo_min_stars=args.repo_min_stars,
+            repos_per_task=args.repos_per_task,
+        )
+        # submit.sh uses these prints to parse the RUN_DIR and NUM_TASKS
+        print(f"RUN_DIR={run_dir}")
+        print(f"NUM_TASKS={num_tasks}")
+        return
+
+    if args.collect:
+        collect_dataset(
+            run_dir,
+            task_id=args.task_id,
+            num_tasks=args.num_tasks,
+            max_repos=args.max_repos,
+            repo_min_stars=args.repo_min_stars,
+        )
+    if args.finalize:
+        finalize_collection(run_dir)
+
+
+if __name__ == "__main__":
+    main()

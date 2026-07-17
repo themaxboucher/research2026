@@ -3,11 +3,11 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
-from comments import extract_comments
-from generate import ModelProfile, _target_comments
-from model_output import strip_output_wrappers
-from prompt import build_location_prompt
-from parse_code import (
+from generate.comments import extract_comments
+from generate.generate import ModelProfile, _target_comments
+from generate.model_output import strip_output_wrappers
+from generate.prompt import build_location_prompt
+from generate.parse_code import (
     enclosing_scope_name as _enclosing_scope_name,
     local_scope_bounds as _local_scope_bounds,
     scope_code as _scope_code,

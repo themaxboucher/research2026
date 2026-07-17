@@ -18,6 +18,6 @@ source .venv/bin/activate
 
 export TQDM_DISABLE=1
 
-python generate.py --finalize \
+python -m generate.generate --finalize \
   --run-dir "${RUN_DIR}" \
   --generation "${GENERATION}"

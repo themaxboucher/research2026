@@ -5,10 +5,10 @@ import tokenize
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import NamedTuple
 
-from generate import _target_comments
-from model_output import strip_code_output_wrappers
-from prompt import build_regenerate_prompt
-from parse_code import scope_bounds
+from generate.generate import _target_comments
+from generate.model_output import strip_code_output_wrappers
+from generate.prompt import build_regenerate_prompt
+from generate.parse_code import scope_bounds
 
 
 class CodeAnalysis(NamedTuple):

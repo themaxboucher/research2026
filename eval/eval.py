@@ -8,9 +8,13 @@ from pathlib import Path
 import evaluate
 from tqdm.auto import tqdm
 
-from generate import LOCATION_FILENAME, REGENERATE_FILENAME, list_generations
-from runs import require_latest_run_directory
+from generate.generate import LOCATION_FILENAME, REGENERATE_FILENAME, list_generations
+from collect.dataset import require_latest_dataset_directory
 from storage import load_from_jsonl
+
+
+LOCATION_METRICS_FILENAME = "location_metrics.json"
+REGENERATE_METRICS_FILENAME = "regenerate_metrics.json"
 
 
 def normalize_comment(text: str) -> str:
@@ -160,7 +164,7 @@ def _write_metrics(records: list[dict], gen_dir: Path, scorer: CommentScorer) ->
             "bertscore_f1": sum(scores["bertscore_f1"]) / len(scores["bertscore_f1"]),
         }
 
-    metrics_path = gen_dir / "metrics.json"
+    metrics_path = gen_dir / LOCATION_METRICS_FILENAME
     metrics_path.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -259,7 +263,7 @@ def _write_regeneration_metrics(
             )
         metrics[model] = model_metrics
 
-    metrics_path = gen_dir / "metrics_regenerate.json"
+    metrics_path = gen_dir / REGENERATE_METRICS_FILENAME
     metrics_path.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -336,7 +340,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     args = parse_args()
 
-    run_dir = Path(args.run_dir) if args.run_dir else require_latest_run_directory()
+    run_dir = Path(args.run_dir) if args.run_dir else require_latest_dataset_directory()
     generations = list_generations(run_dir)
     if args.generation:
         generations = [gen for gen in generations if gen["id"] == args.generation]

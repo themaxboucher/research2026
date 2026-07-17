@@ -10,7 +10,8 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# Run everything from the repo root so .env, .venv, runs/ and logs/ resolve
+cd "$(dirname "$0")/../.."
 
 NUM_TASKS=""
 RUN_DIR=""
@@ -53,7 +54,7 @@ export MODEL_PROFILE=cluster
 python - <<'EOF'
 from huggingface_hub import snapshot_download
 
-from generate import MODEL_PROFILES
+from generate.generate import MODEL_PROFILES
 
 for model_name in MODEL_PROFILES["cluster"].model_names:
     print(f"Ensuring {model_name} is in the HF cache")
@@ -68,8 +69,8 @@ PREP_ARGS=(--prepare)
 [[ -n "$APPROACHES" ]] && PREP_ARGS+=(--approaches "$APPROACHES")
 [[ -n "$MAX_GENERATE" ]] && PREP_ARGS+=(--max-generate "$MAX_GENERATE")
 
-echo "+ python generate.py ${PREP_ARGS[*]}"
-PREP_OUT="$(python generate.py "${PREP_ARGS[@]}")"
+echo "+ python -m generate.generate ${PREP_ARGS[*]}"
+PREP_OUT="$(python -m generate.generate "${PREP_ARGS[@]}")"
 
 RUN_DIR="$(grep '^RUN_DIR=' <<<"$PREP_OUT" | cut -d= -f2-)"
 GENERATION="$(grep '^GENERATION=' <<<"$PREP_OUT" | cut -d= -f2-)"
@@ -91,12 +92,12 @@ ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}"
 ARRAY_JOB_ID=$(sbatch --parsable \
   --array="$ARRAY_SPEC" \
   --export=ALL,RUN_DIR="$RUN_DIR",GENERATION="$GENERATION" \
-  generate-job.sh)
+  generate/scripts/generate-job.sh)
 echo "Submitted array job $ARRAY_JOB_ID (--array=$ARRAY_SPEC)"
 
 # Phase 3: Merge the per-task shards once every task succeeds
 FINALIZE_JOB_ID=$(sbatch --parsable \
   --dependency=afterok:"$ARRAY_JOB_ID" \
   --export=ALL,RUN_DIR="$RUN_DIR",GENERATION="$GENERATION" \
-  generate-finalize.sh)
+  generate/scripts/generate-finalize.sh)
 echo "Submitted finalize job $FINALIZE_JOB_ID (afterok:$ARRAY_JOB_ID)"

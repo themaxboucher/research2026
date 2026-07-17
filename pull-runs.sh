@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Pull run folders (and SLURM logs) generated on the HPC cluster down to this
-# machine, so dashboard.py / report.py can read them locally.
+# machine, so dashboard.py / eval.py can read them locally.
 #
 # Configure once in .env:
 #   CLUSTER_SSH_HOST=<~/.ssh/config Host alias for the cluster login node>
@@ -83,8 +83,10 @@ run_rsync() {
 
 # Only pull the aggregated JSONL outputs from a run, never the numbered shards.
 # --prune-empty-dirs keeps the timestamp dir(s) but drops empty shard subdirs.
+# repo_files.jsonl is the pre-rename name of dataset.jsonl; kept for old runs.
 RUN_FILTERS=(--prune-empty-dirs --include='*/' \
-  --include='mined_repos.jsonl' --include='repo_files.jsonl' --exclude='*')
+  --include='mined_repos.jsonl' --include='dataset.jsonl' \
+  --include='repo_files.jsonl' --exclude='*')
 
 mkdir -p runs
 

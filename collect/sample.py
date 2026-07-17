@@ -1,4 +1,4 @@
-from runs import require_latest_run_directory
+from collect.dataset import require_latest_dataset_directory
 from storage import iter_from_jsonl, save_to_jsonl
 from collections.abc import Iterable, Iterator
 from pathlib import Path
@@ -7,8 +7,8 @@ import argparse
 import logging
 import random
 
-DATA_FILENAME = "repo_files"
-SAMPLE_FILENAME = "repo_files_sample"
+DATA_FILENAME = "dataset"
+SAMPLE_FILENAME = "dataset_sample"
 DEFAULT_NUM_COMMITS = 100
 DEFAULT_MAX_FILES_PER_COMMIT = 5
 
@@ -51,7 +51,7 @@ def _reservoir_sample_commits(
     random_num_generator: random.Random,
 ) -> list[list[dict]]:
     # Reservoir sampling keeps a uniform random subset of qualifying commits in a
-    # single pass, so we never hold the full repo_files.jsonl (>100 GB) in memory.
+    # single pass, so we never hold the full dataset.jsonl (>100 GB) in memory.
     reservoir: list[list[dict]] = []
     qualifying_index = 0
     progress_bar = tqdm(records, desc="Sampling records", unit="record")
@@ -103,7 +103,7 @@ def sample_dataset(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Sample whole commits (and all their files) from repo_files.jsonl"
+        description="Sample whole commits (and all their files) from dataset.jsonl"
     )
     parser.add_argument(
         "--num-commits",
@@ -131,7 +131,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    run_dir = Path(args.run_dir) if args.run_dir else require_latest_run_directory()
+    run_dir = Path(args.run_dir) if args.run_dir else require_latest_dataset_directory()
     logging.info("Sampling from run directory: %s", run_dir)
     sample_dataset(
         run_dir,

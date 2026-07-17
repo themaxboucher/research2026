@@ -5,13 +5,15 @@ import logging
 import os
 import re
 import subprocess
+import tokenize
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, NamedTuple
 
-from llms import openrouter, transformers
-from runs import require_latest_run_directory
+from generate.llms import openrouter
+from generate.llms import transformers
+from collect.dataset import require_latest_dataset_directory
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
@@ -20,10 +22,10 @@ from storage import (
     save_to_jsonl,
     truncate_broken_tail,
 )
-from comments import is_machine_directive_comment
+from generate.comments import get_comments_from_file, is_machine_directive_comment
 
 
-SOURCE_FILENAME = "repo_files_sample"
+SOURCE_FILENAME = "dataset_sample"
 
 # These are the approaches we use to prompt the LLMs. Different approaches produce
 # different types of outputs (e.g. generate only the comment vs regenerate the
@@ -42,8 +44,7 @@ PROGRESS_FILENAME = "generation_progress"
 def _file_key(record: dict) -> str:
     # `\x00` is a safe separator because it's not valid in a GitHub repo name, path, or commit hash.
     return "\x00".join(
-        str(record.get(field))
-        for field in ("repo_name", "new_path", "commit_hash")
+        str(record.get(field)) for field in ("repo_name", "new_path", "commit_hash")
     )
 
 
@@ -252,7 +253,7 @@ def _target_comments(source_file: dict) -> list[dict]:
         and not is_machine_directive_comment(comment["comment"])
         and _has_at_least_one_alpha_char(comment.get("comment", ""))
         and not _is_visual_separator_comment(comment.get("comment", ""))
-        and comment.get("comment", "").isascii() # Exclude non-english comments
+        and comment.get("comment", "").isascii()  # Exclude non-english comments
     ]
 
 
@@ -305,6 +306,10 @@ def _is_ai_authored_file(source_file: dict) -> bool:
 
 def _is_eligible_file(source_file: dict) -> bool:
     """Check if a file record should be included in the generation."""
+    is_python_file = source_file.get("new_path", "").endswith(".py")
+    if not is_python_file:
+        return False
+
     ELIGIBLE_CHANGE_TYPES = {"MODIFY"}
     is_valid_change_type = source_file.get("change_type") in ELIGIBLE_CHANGE_TYPES
     if not is_valid_change_type:
@@ -329,6 +334,29 @@ def _is_eligible_file(source_file: dict) -> bool:
     return True
 
 
+def _with_parsed_comments(files_data):
+    """Annotate each streamed file record with its parsed code comments."""
+    for file_data in files_data:
+        file_data["comments"] = []
+        source_code = file_data.get("source_code")
+        previous_source_code = file_data.get("previous_source_code")
+        # Records missing either side (e.g. added or deleted files) are
+        # filtered out by _is_eligible_file before their comments are read.
+        if source_code is None or previous_source_code is None:
+            yield file_data
+            continue
+        try:
+            file_data["comments"] = get_comments_from_file(
+                source_code, previous_source_code
+            )
+        except (tokenize.TokenError, SyntaxError) as e:
+            logging.warning(
+                "Failed to parse comments for %s: %s", file_data.get("new_path"), e
+            )
+            file_data["error"] = str(e)
+        yield file_data
+
+
 def _generate_outputs_for_file(
     file_data: dict,
     model_profile: ModelProfile,
@@ -336,8 +364,8 @@ def _generate_outputs_for_file(
 ) -> list[tuple[str, list[dict]]]:
     # Imported here so each approach module can share this module's model
     # profile and target-comment helpers without a circular import.
-    from location_generate import location_generate_for_file
-    from regenerate_generate import regenerate_generate_for_file
+    from generate.location_generate import location_generate_for_file
+    from generate.regenerate_generate import regenerate_generate_for_file
 
     outputs: list[tuple[str, list[dict]]] = []
     if "regenerate" in approaches:
@@ -411,7 +439,8 @@ def _run_generation(
         if not (gen_dir / f"{filename}.jsonl").exists():
             save_to_jsonl([], gen_dir, filename)
 
-    files_data = iter_from_jsonl(run_dir, SOURCE_FILENAME)
+    files_data = _with_parsed_comments(iter_from_jsonl(run_dir, SOURCE_FILENAME))
+
     eligible_files = (
         file_data for file_data in files_data if _is_eligible_file(file_data)
     )
@@ -524,7 +553,7 @@ def generate_comments_for_dataset(
     ):
         raise RuntimeError(
             f"Generation {label!r} was produced by a job array; resume it with "
-            "generate-submit.sh or choose a new label"
+            "generate/scripts/generate-submit.sh or choose a new label"
         )
 
     write_manifest(
@@ -540,9 +569,7 @@ def generate_comments_for_dataset(
         created_at=existing_manifest.get("created_at"),
     )
 
-    return _run_generation(
-        run_dir, gen_dir, label, model_profile, approaches, limit
-    )
+    return _run_generation(run_dir, gen_dir, label, model_profile, approaches, limit)
 
 
 def prepare_generation(
@@ -557,7 +584,7 @@ def prepare_generation(
     source_path = run_dir / f"{SOURCE_FILENAME}.jsonl"
     if not source_path.exists():
         raise FileNotFoundError(
-            f"No sample file at {source_path}. Run sample.py on this run first."
+            f"No sample file at {source_path}. Run collect/sample.py on this run first."
         )
 
     model_profile, model_profile_name = get_model_profile()
@@ -611,15 +638,14 @@ def generate_comments_for_task(run_dir: Path, label: str, task_id: int) -> Path:
     if not manifest:
         raise RuntimeError(
             f"No manifest at {gen_dir / MANIFEST_FILENAME}; submit the array "
-            "through generate-submit.sh so the manifest is written first"
+            "through generate/scripts/generate-submit.sh so the manifest is written first"
         )
 
     config = manifest.get("config") or {}
     num_tasks = config.get("num_tasks")
     if num_tasks is None:
         raise RuntimeError(
-            f"Generation {label!r} was not prepared for a job array; "
-            "choose a new label"
+            f"Generation {label!r} was not prepared for a job array; choose a new label"
         )
     if not 0 <= task_id < num_tasks:
         raise ValueError(
@@ -680,7 +706,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate LLM comments for a collected, sampled run. With no "
         "stage flag, generates on a single machine; --prepare/--finalize and "
-        "--task-id drive the SLURM job array (see generate-submit.sh)."
+        "--task-id drive the SLURM job array (see generate/scripts/generate-submit.sh)."
     )
     parser.add_argument(
         "--run-dir",
@@ -716,7 +742,7 @@ def _parse_args() -> argparse.Namespace:
         "--prepare",
         action="store_true",
         help="Write the generation manifest for a job array and print RUN_DIR, "
-        "GENERATION and NUM_TASKS for generate-submit.sh",
+        "GENERATION and NUM_TASKS for generate/scripts/generate-submit.sh",
     )
     stages.add_argument(
         "--finalize",
@@ -744,9 +770,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
-    run_dir = (
-        Path(args.run_dir) if args.run_dir else require_latest_run_directory()
-    )
+    run_dir = Path(args.run_dir) if args.run_dir else require_latest_dataset_directory()
     logging.info("Using run directory: %s", run_dir)
 
     approaches = [
@@ -761,7 +785,7 @@ def main() -> None:
             limit=args.max_generate,
             approaches=approaches,
         )
-        # generate-submit.sh uses these prints to parse the array parameters
+        # generate/scripts/generate-submit.sh uses these prints to parse the array parameters
         print(f"RUN_DIR={run_dir}")
         print(f"GENERATION={label}")
         print(f"NUM_TASKS={num_tasks}")
@@ -776,9 +800,7 @@ def main() -> None:
     if args.task_id is not None:
         if not args.generation:
             raise SystemExit("--generation is required when generating with --task-id")
-        generate_comments_for_task(
-            run_dir, label=args.generation, task_id=args.task_id
-        )
+        generate_comments_for_task(run_dir, label=args.generation, task_id=args.task_id)
         return
 
     generate_comments_for_dataset(

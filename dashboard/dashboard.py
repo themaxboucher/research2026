@@ -16,11 +16,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-import generate
-from comments import apply_generated_comment, is_machine_directive_comment
-from runs import require_latest_run_directory
+import generate.generate as generate
+from generate.comments import apply_generated_comment, is_machine_directive_comment
+from collect.dataset import require_latest_dataset_directory
 
-DATASET_FILENAME = "repo_files_sample"
+DATASET_FILENAME = "dataset_sample"
 REGENERATED_METRICS_FILENAME = "metrics_regenerate.json"
 NOTES_FILENAME = "review_notes.json"
 DASHBOARD_HTML = Path(__file__).parent / "dashboard.html"
@@ -613,7 +613,7 @@ def _build_regenerations_payload(
 # Labeling each human comment's intent (why the code is as it is / what it does /
 # how it works). Targets come from the source dataset (shared across
 # generations); labels are written back onto the comments in
-# repo_files_sample.jsonl.
+# dataset_sample.jsonl.
 
 
 def _iter_source_records(source_path: Path):
@@ -740,7 +740,7 @@ def _build_generation_state(
         matched = _match_generated(sidebar, generated_records)
         if matched < len(generated_records):
             logging.warning(
-                "%d generated record(s) have no repo_files match in generation %s",
+                "%d generated record(s) have no dataset match in generation %s",
                 len(generated_records) - matched,
                 gen_dir.name,
             )
@@ -1049,14 +1049,14 @@ def serve(run_dir: Path, port: int | None, open_browser: bool) -> None:
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Preview repo_files.jsonl in a local HTML dashboard."
+        description="Preview dataset_sample.jsonl in a local HTML dashboard."
     )
     parser.add_argument(
         "run_dir",
         nargs="?",
         type=Path,
         default=None,
-        help="Run directory containing repo_files.jsonl (defaults to latest run).",
+        help="Run directory containing dataset_sample.jsonl (defaults to latest run).",
     )
     parser.add_argument(
         "--port", type=int, default=None, help="Port to bind (default: random free port)."
@@ -1071,7 +1071,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> None:
     args = _parse_args(argv)
-    run_dir = args.run_dir if args.run_dir is not None else require_latest_run_directory()
+    run_dir = args.run_dir if args.run_dir is not None else require_latest_dataset_directory()
     serve(run_dir, args.port, open_browser=not args.no_open)
 
 

@@ -22,7 +22,7 @@ export MODEL_PROFILE=cluster
 # Models were pre-downloaded by generate-submit.sh; compute nodes stay offline
 export HF_HUB_OFFLINE=1
 
-python generate.py \
+python -m generate.generate \
   --run-dir "${RUN_DIR}" \
   --generation "${GENERATION}" \
   --task-id "${SLURM_ARRAY_TASK_ID}"

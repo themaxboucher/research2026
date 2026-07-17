@@ -11,7 +11,8 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# Run everything from the repo root so .env, .venv, runs/ and logs/ resolve
+cd "$(dirname "$0")/../.."
 
 REPOS_PER_TASK=10
 THROTTLE=20
@@ -59,8 +60,8 @@ PREP_ARGS=(--prepare --repos-per-task "$REPOS_PER_TASK")
 [[ -n "$MAX_REPOS" ]] && PREP_ARGS+=(--max-repos "$MAX_REPOS")
 [[ -n "$REPO_MIN_STARS" ]] && PREP_ARGS+=(--repo-min-stars "$REPO_MIN_STARS")
 
-echo "+ python main.py ${PREP_ARGS[*]}"
-PREP_OUT="$(python main.py "${PREP_ARGS[@]}")"
+echo "+ python -m collect.collect ${PREP_ARGS[*]}"
+PREP_OUT="$(python -m collect.collect "${PREP_ARGS[@]}")"
 
 RUN_DIR="$(grep '^RUN_DIR=' <<<"$PREP_OUT" | cut -d= -f2-)"
 NUM_TASKS="$(grep '^NUM_TASKS=' <<<"$PREP_OUT" | cut -d= -f2-)"
@@ -80,12 +81,12 @@ ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}%${THROTTLE}"
 ARRAY_JOB_ID=$(sbatch --parsable \
   --array="$ARRAY_SPEC" \
   --export=ALL,RUN_DIR="$RUN_DIR",NUM_TASKS="$NUM_TASKS" \
-  job.sh)
+  collect/scripts/job.sh)
 echo "Submitted array job $ARRAY_JOB_ID (--array=$ARRAY_SPEC)"
 
 # Phase 3: Finalize data collection
 FINALIZE_JOB_ID=$(sbatch --parsable \
   --dependency=afterok:"$ARRAY_JOB_ID" \
   --export=ALL,RUN_DIR="$RUN_DIR" \
-  finalize.sh)
+  collect/scripts/finalize.sh)
 echo "Submitted finalize job $FINALIZE_JOB_ID (afterok:$ARRAY_JOB_ID)"
