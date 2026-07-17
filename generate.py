@@ -229,10 +229,11 @@ def _target_comments(source_file: dict) -> list[dict]:
         if comment.get("type") in TARGET_COMMENT_TYPES
         and comment.get("status") in TARGET_COMMENT_STATUSES
         and comment.get("comment") is not None
-        and not is_machine_directive_comment(comment["comment"])
         and comment.get("intent") in TARGET_INTENTS
+        and not is_machine_directive_comment(comment["comment"])
         and _has_at_least_one_alpha_char(comment.get("comment", ""))
         and not _is_visual_separator_comment(comment.get("comment", ""))
+        and comment.get("comment", "").isascii() # Exclude non-english comments
     ]
 
 
