@@ -22,7 +22,7 @@ MAX_REPOS=""
 REPO_MIN_STARS=""
 
 usage() {
-  sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
