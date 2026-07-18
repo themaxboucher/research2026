@@ -1,5 +1,6 @@
 import argparse
 import logging
+import time
 from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -119,6 +120,30 @@ def _mine_repo(
     return repo_files
 
 
+MINING_MAX_ATTEMPTS = 3
+MINING_RETRY_DELAY_SECONDS = 3
+
+
+def _mine_repo_with_retries(
+    repo_url: str, repo_full_name: str, branch: str, since: str, to: datetime
+) -> list[dict]:
+    for attempt in range(1, MINING_MAX_ATTEMPTS + 1):
+        try:
+            return _mine_repo(repo_url, repo_full_name, branch, since, to)
+        except Exception as error:
+            if attempt == MINING_MAX_ATTEMPTS:
+                raise
+            logging.warning(
+                "Error mining %s (attempt %d/%d), retrying in %ds: %s",
+                repo_url,
+                attempt,
+                MINING_MAX_ATTEMPTS,
+                MINING_RETRY_DELAY_SECONDS,
+                error,
+            )
+            time.sleep(MINING_RETRY_DELAY_SECONDS)
+
+
 def _mine_and_persist_repo(
     repo: dict,
     run_dir: Path,
@@ -129,7 +154,7 @@ def _mine_and_persist_repo(
 ) -> int:
     repo_url = repo["html_url"]
     try:
-        repo_files = _mine_repo(
+        repo_files = _mine_repo_with_retries(
             repo_url,
             repo["full_name"],
             repo["default_branch"],
