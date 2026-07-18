@@ -10,7 +10,6 @@ from datetime import datetime
 from collect.prepare import get_repos
 from collect.dataset import (
     dataset_directory_timestamp,
-    create_new_dataset_directory,
     resolve_dataset_directory,
 )
 from storage import (
@@ -221,12 +220,7 @@ def _parse_args():
         "--dataset-dir",
         type=str,
         default=None,
-        help="Use this exact dataset directory instead of picking one automatically",
-    )
-    parser.add_argument(
-        "--new-dataset",
-        action="store_true",
-        help="Start a fresh timestamped dataset directory instead of using the latest",
+        help="Use this exact dataset directory instead of defaulting to the latest timestamped directory",
     )
     parser.add_argument(
         "--task-id",
@@ -257,14 +251,11 @@ def _parse_args():
 
     return parser.parse_args()
 
-
 def main():
     args = _parse_args()
 
     if args.dataset_dir:
         dataset_directory = Path(args.dataset_dir)
-    elif args.new_dataset:
-        dataset_directory = create_new_dataset_directory()
     else:
         dataset_directory = resolve_dataset_directory()
 
