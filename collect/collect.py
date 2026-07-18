@@ -97,6 +97,10 @@ def _mine_repo(
 
     for commit in repo.traverse_commits():
         for file in commit.modified_files:
+            is_python_file = file.filename.endswith(".py")
+            if not is_python_file:
+                continue
+
             repo_files.append(
                 {
                     "repo_name": repo_full_name,
