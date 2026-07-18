@@ -8,7 +8,7 @@ from threading import Lock
 from pydriller import Repository
 from datetime import datetime
 
-from collect.prepare import get_repos
+from collect.repos import get_repos
 from collect.dataset import (
     dataset_directory_from_argument,
     dataset_directory_timestamp,
