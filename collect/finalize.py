@@ -35,7 +35,10 @@ def _parse_args():
 
 def main():
     args = _parse_args()
-    _finalize(args.dataset_dir)
+
+    dataset_directory = Path(args.dataset_dir)
+    
+    _finalize(dataset_directory)
 
 
 if __name__ == "__main__":

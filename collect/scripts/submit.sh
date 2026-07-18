@@ -56,7 +56,7 @@ python -m pip install -r requirements.txt
 
 # Phase 1: Prepare
 PREP_ARGS=(--repos-per-task "$REPOS_PER_TASK")
-[[ -n "$DATASET_DIR" ]] && PREP_ARGS+=(--run-dir "$DATASET_DIR")
+[[ -n "$DATASET_DIR" ]] && PREP_ARGS+=(--dataset-dir "$DATASET_DIR")
 [[ -n "$MAX_REPOS" ]] && PREP_ARGS+=(--max-repos "$MAX_REPOS")
 [[ -n "$REPO_MIN_STARS" ]] && PREP_ARGS+=(--repo-min-stars "$REPO_MIN_STARS")
 
