@@ -252,6 +252,7 @@ def _parse_args():
     return parser.parse_args()
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
     if args.dataset_dir:

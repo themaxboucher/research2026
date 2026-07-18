@@ -34,10 +34,11 @@ def _parse_args():
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
     dataset_directory = Path(args.dataset_dir)
-    
+
     _finalize(dataset_directory)
 
 
