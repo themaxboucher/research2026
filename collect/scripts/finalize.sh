@@ -18,4 +18,4 @@ source .venv/bin/activate
 
 export TQDM_DISABLE=1
 
-python -m collect.collect --finalize --run-dir "${RUN_DIR}"
+python -m collect.finalize --dataset-dir "${DATASET_DIR}"

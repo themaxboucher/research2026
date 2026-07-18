@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
+from collect.constants import DATASET_DIRECTORY_NAME
 
-DATASET_DIRECTORY_NAME = "datasets"
 DATASET_DIRECTORY = Path(__file__).parent / DATASET_DIRECTORY_NAME
 DATASET_TIMESTAMP_FORMAT = "%Y-%m-%dT%H-%M-%S"
 
@@ -29,10 +29,7 @@ def find_latest_dataset_directory() -> Path | None:
     return existing_dataset_directories[-1]
 
 
-def resolve_dataset_directory(create_new_run: bool) -> Path:
-    if create_new_run:
-        return create_new_dataset_directory()
-
+def resolve_dataset_directory() -> Path:
     latest_dataset_directory = find_latest_dataset_directory()
     if latest_dataset_directory is not None:
         return latest_dataset_directory

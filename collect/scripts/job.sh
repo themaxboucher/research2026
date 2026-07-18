@@ -18,7 +18,7 @@ source .venv/bin/activate
 
 export TQDM_DISABLE=1
 
-python -m collect.collect --collect \
-  --run-dir "${RUN_DIR}" \
+python -m collect.collect \
+  --dataset-dir "${DATASET_DIR}" \
   --task-id "${SLURM_ARRAY_TASK_ID}" \
   --num-tasks "${NUM_TASKS}"

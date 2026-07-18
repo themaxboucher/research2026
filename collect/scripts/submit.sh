@@ -2,7 +2,7 @@
 #
 # Usage:
 #   ./submit.sh                         Fresh run with defaults
-#   ./submit.sh --run-dir runs/<ts>     Resume an existing run (reuses its cache)
+#   ./submit.sh --dataset-dir datasets/<ts>     Resume an existing dataset (reuses its cache)
 #   ./submit.sh --array 3,7,12          Submit only these task indices (resume)
 #   ./submit.sh --repos-per-task 10     Repos per task (default 10)
 #   ./submit.sh --throttle 20           Max concurrent array tasks (default 20)
@@ -11,12 +11,12 @@
 
 set -euo pipefail
 
-# Run everything from the repo root so .env, .venv, runs/ and logs/ resolve
+# Run everything from the repo root
 cd "$(dirname "$0")/../.."
 
 REPOS_PER_TASK=10
 THROTTLE=20
-RUN_DIR=""
+DATASET_DIR=""
 ARRAY_INDICES=""
 MAX_REPOS=""
 REPO_MIN_STARS=""
@@ -28,7 +28,7 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --run-dir) RUN_DIR="$2"; shift 2 ;;
+    --dataset-dir) DATASET_DIR="$2"; shift 2 ;;
     --array) ARRAY_INDICES="$2"; shift 2 ;;
     --repos-per-task) REPOS_PER_TASK="$2"; shift 2 ;;
     --throttle) THROTTLE="$2"; shift 2 ;;
@@ -55,24 +55,24 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
 # Phase 1: Prepare
-PREP_ARGS=(--prepare --repos-per-task "$REPOS_PER_TASK")
-[[ -n "$RUN_DIR" ]] && PREP_ARGS+=(--run-dir "$RUN_DIR")
+PREP_ARGS=(--repos-per-task "$REPOS_PER_TASK")
+[[ -n "$DATASET_DIR" ]] && PREP_ARGS+=(--run-dir "$DATASET_DIR")
 [[ -n "$MAX_REPOS" ]] && PREP_ARGS+=(--max-repos "$MAX_REPOS")
 [[ -n "$REPO_MIN_STARS" ]] && PREP_ARGS+=(--repo-min-stars "$REPO_MIN_STARS")
 
-echo "+ python -m collect.collect ${PREP_ARGS[*]}"
-PREP_OUT="$(python -m collect.collect "${PREP_ARGS[@]}")"
+echo "+ python -m collect.prepare ${PREP_ARGS[*]}"
+PREP_OUT="$(python -m collect.prepare "${PREP_ARGS[@]}")"
 
-RUN_DIR="$(grep '^RUN_DIR=' <<<"$PREP_OUT" | cut -d= -f2-)"
+DATASET_DIR="$(grep '^DATASET_DIR=' <<<"$PREP_OUT" | cut -d= -f2-)"
 NUM_TASKS="$(grep '^NUM_TASKS=' <<<"$PREP_OUT" | cut -d= -f2-)"
 
-if [[ -z "$RUN_DIR" || -z "$NUM_TASKS" ]]; then
+if [[ -z "$DATASET_DIR" || -z "$NUM_TASKS" ]]; then
   echo "Prep did not return RUN_DIR/NUM_TASKS:" >&2
   echo "$PREP_OUT" >&2
   exit 1
 fi
 
-echo "Run dir:   $RUN_DIR"
+echo "Dataset dir:   $DATASET_DIR"
 echo "Num tasks: $NUM_TASKS"
 
 # Phase 2: Submit the jobs array
@@ -80,13 +80,13 @@ ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}%${THROTTLE}"
 
 ARRAY_JOB_ID=$(sbatch --parsable \
   --array="$ARRAY_SPEC" \
-  --export=ALL,RUN_DIR="$RUN_DIR",NUM_TASKS="$NUM_TASKS" \
+  --export=ALL,DATASET_DIR="$DATASET_DIR",NUM_TASKS="$NUM_TASKS" \
   collect/scripts/job.sh)
 echo "Submitted array job $ARRAY_JOB_ID (--array=$ARRAY_SPEC)"
 
 # Phase 3: Finalize data collection
 FINALIZE_JOB_ID=$(sbatch --parsable \
   --dependency=afterok:"$ARRAY_JOB_ID" \
-  --export=ALL,RUN_DIR="$RUN_DIR" \
+  --export=ALL,DATASET_DIR="$DATASET_DIR" \
   collect/scripts/finalize.sh)
 echo "Submitted finalize job $FINALIZE_JOB_ID (afterok:$ARRAY_JOB_ID)"

@@ -1,0 +1,107 @@
+from pathlib import Path
+import math
+import logging
+import argparse
+from collect.constants import (
+    DEFAULT_MAX_REPOS,
+    DEFAULT_REPOS_PER_TASK,
+    REPOS_CACHE_FILENAME,
+    REPO_LANGUAGE,
+    CUTOFF_DATE,
+)
+from collect.dataset import create_new_dataset_directory
+from storage import load_from_jsonl, append_to_jsonl
+from collect.github import search_repos
+
+
+def get_repos(repo_min_stars: int, max_repos: int | None, dataset_directory: Path) -> list[dict]:
+    repos_cache_path = dataset_directory / f"{REPOS_CACHE_FILENAME}.jsonl"
+    if repos_cache_path.exists():
+        logging.info("Loading cached repositories from %s", repos_cache_path)
+        return load_from_jsonl(dataset_directory, REPOS_CACHE_FILENAME)
+
+    logging.info("Searching for repositories with at least %d stars", repo_min_stars)
+    repos = search_repos(
+        language=REPO_LANGUAGE,
+        min_stars=repo_min_stars,
+        pushed_after=CUTOFF_DATE,
+        limit=max_repos,
+    )[:max_repos]
+
+    append_to_jsonl(repos, dataset_directory, REPOS_CACHE_FILENAME)
+
+    return repos
+
+
+def _prepare(
+    dataset_directory: Path,
+    max_repos: int | None,
+    repo_min_stars: int,
+    repos_per_task: int,
+) -> int:
+    repos = get_repos(repo_min_stars, max_repos, dataset_directory)
+    num_tasks = max(1, math.ceil(len(repos) / repos_per_task))
+    logging.info(
+        "Prepared %d repositories into %d tasks (<=%d repos each)",
+        len(repos),
+        num_tasks,
+        repos_per_task,
+    )
+    return num_tasks
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset-dir",
+        type=str,
+        default=None,
+        help="Use this exact dataset directory instead of picking one automatically",
+    )
+    parser.add_argument(
+        "--max-repos",
+        type=int,
+        default=DEFAULT_MAX_REPOS,
+        help="Limit number of repos processed",
+    )
+    parser.add_argument(
+        "--repo-min-stars",
+        type=int,
+        default=0,
+        help="Only include repos with at least this many stars",
+    )
+    parser.add_argument(
+        "--repos-per-task",
+        type=int,
+        default=DEFAULT_REPOS_PER_TASK,
+        help="Repos per array task",
+    )
+
+    return parser.parse_args()
+
+
+def main():
+    args = _parse_args()
+
+    if args.dataset_dir:
+        dataset_directory = Path(args.dataset_dir)
+        dataset_directory.mkdir(parents=True, exist_ok=True)
+    else:
+        dataset_directory = create_new_dataset_directory()
+
+    logging.info("Using dataset directory: %s", dataset_directory)
+
+    num_tasks = _prepare(
+        dataset_directory,
+        max_repos=args.max_repos,
+        repo_min_stars=args.repo_min_stars,
+        repos_per_task=args.repos_per_task,
+    )
+    # submit.sh uses these prints to parse the RUN_DIR and NUM_TASKS
+    print(f"DATASET_DIR={dataset_directory}")
+    print(f"NUM_TASKS={num_tasks}")
+    return
+
+
+if __name__ == "__main__":
+    main()

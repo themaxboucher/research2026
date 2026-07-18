@@ -1,35 +1,30 @@
-from collect.github import search_repos
-from collect.dataset import dataset_directory_timestamp, resolve_dataset_directory
 import argparse
-from storage import (
-    append_to_jsonl,
-    drop_trailing_records,
-    load_from_jsonl,
-    merge_jsonl_shards,
-    truncate_broken_tail,
-)
-from tqdm.auto import tqdm
 import logging
-import math
+from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 from pydriller import Repository
 from datetime import datetime
 
-# === LLM knowledge cutoffs ===
-# GPT-5.6 Luna (https://developers.openai.com/api/docs/models/gpt-5.6-luna): Feb 16, 2026
-# Llama 3.1 8b (https://huggingface.co/meta-llama/Llama-3.1-8B): December 2023
-# Qwen 2.5 7b (https://huggingface.co/Qwen/Qwen2.5-7B): Unknown, but we know the model was released in Sep 2024
-
-CUTOFF_DATE = "2026-02-17" # After GPT-5.6 Luna's knowledge cutoff, to avoid data leakage
-
-REPO_LANGUAGE = "Python"
-DEFAULT_MINING_WORKERS = 16
-
-DATA_FILENAME = "dataset"
-REPOS_CACHE_FILENAME = "repos_cache"
-MINNED_REPOS_FILENAME = "mined_repos"
+from collect.prepare import get_repos
+from collect.dataset import (
+    dataset_directory_timestamp,
+    create_new_dataset_directory,
+    resolve_dataset_directory,
+)
+from storage import (
+    append_to_jsonl,
+    drop_trailing_records,
+    load_from_jsonl,
+    truncate_broken_tail,
+)
+from collect.constants import (
+    DATA_FILENAME,
+    MINNED_REPOS_FILENAME,
+    CUTOFF_DATE,
+    DEFAULT_MAX_REPOS,
+)
 
 
 def _get_shard_filenames(task_id: int, num_tasks: int) -> tuple[str, str]:
@@ -64,25 +59,6 @@ def _clean_previous_data(
             "Removed %d records from an interrupted repo. It will be re-mined",
             removed_records,
         )
-
-
-def _get_repos(repo_min_stars: int, max_repos: int | None, run_dir: Path) -> list[dict]:
-    repos_cache_path = run_dir / f"{REPOS_CACHE_FILENAME}.jsonl"
-    if repos_cache_path.exists():
-        logging.info("Loading cached repositories from %s", repos_cache_path)
-        return load_from_jsonl(run_dir, REPOS_CACHE_FILENAME)
-
-    logging.info("Searching for repositories with at least %d stars", repo_min_stars)
-    repos = search_repos(
-        language=REPO_LANGUAGE,
-        min_stars=repo_min_stars,
-        pushed_after=CUTOFF_DATE,
-        limit=max_repos,
-    )[:max_repos]
-
-    append_to_jsonl(repos, run_dir, REPOS_CACHE_FILENAME)
-
-    return repos
 
 
 def _mined_repo_names(run_dir: Path, mined_filename: str) -> set[str]:
@@ -178,36 +154,7 @@ def _mine_and_persist_repo(
     return len(repo_files)
 
 
-def prepare_collection(
-    run_dir: Path,
-    max_repos: int | None,
-    repo_min_stars: int,
-    repos_per_task: int,
-) -> int:
-    repos = _get_repos(repo_min_stars, max_repos, run_dir)
-    num_tasks = max(1, math.ceil(len(repos) / repos_per_task))
-    logging.info(
-        "Prepared %d repositories into %d tasks (<=%d repos each)",
-        len(repos),
-        num_tasks,
-        repos_per_task,
-    )
-    return num_tasks
-
-
-def finalize_collection(run_dir: Path) -> None:
-    repo_file_shards = merge_jsonl_shards(run_dir, DATA_FILENAME)
-    mined_repo_shards = merge_jsonl_shards(run_dir, MINNED_REPOS_FILENAME)
-    logging.info(
-        "Merged %d %s shards and %d %s shards",
-        repo_file_shards,
-        DATA_FILENAME,
-        mined_repo_shards,
-        MINNED_REPOS_FILENAME,
-    )
-
-
-def collect_dataset(
+def _collect(
     run_dir: Path,
     task_id: int | None = None,
     num_tasks: int | None = None,
@@ -220,10 +167,11 @@ def collect_dataset(
     else:
         data_filename, mined_filename = DATA_FILENAME, MINNED_REPOS_FILENAME
 
-    all_repos = _get_repos(repo_min_stars, max_repos, run_dir)
+    all_repos = get_repos(repo_min_stars, max_repos, run_dir)
     mining_end = dataset_directory_timestamp(run_dir)
 
     sorted_repos = _sort_repos_by_size(all_repos)
+
     if in_jobs_array:
         # Ensure a balanced distribution of repo sizes across tasks
         repos_partition = sorted_repos[task_id::num_tasks]
@@ -239,7 +187,8 @@ def collect_dataset(
         return
 
     write_lock = Lock()
-    workers = max(1, min(DEFAULT_MINING_WORKERS, len(repos)))
+    MINING_WORKERS = 16
+    workers = max(1, min(MINING_WORKERS, len(repos)))
 
     logging.info("Mining %d repositories with %d workers", len(repos), workers)
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -269,114 +218,63 @@ def collect_dataset(
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--prepare",
-        action="store_true",
-        help="Search GitHub once, cache the repo list, and print RUN_DIR and "
-        "NUM_TASKS for the job array",
-    )
-    parser.add_argument(
-        "--collect", action="store_true", help="Collect data from GitHub"
-    )
-    parser.add_argument(
-        "--finalize",
-        action="store_true",
-        help="Merge the per-task output shards into single files",
-    )
-    parser.add_argument(
-        "--new-run",
-        action="store_true",
-        help="Start a fresh timestamped run directory instead of using the latest",
-    )
-    parser.add_argument(
-        "--run-dir",
+        "--dataset-dir",
         type=str,
         default=None,
-        help="Use this exact run directory instead of picking one "
-        "automatically, so every array task shares one run",
+        help="Use this exact dataset directory instead of picking one automatically",
     )
-
-    array = parser.add_argument_group("job array (HPC partitioning)")
-    array.add_argument(
+    parser.add_argument(
+        "--new-dataset",
+        action="store_true",
+        help="Start a fresh timestamped dataset directory instead of using the latest",
+    )
+    parser.add_argument(
         "--task-id",
         type=int,
         default=None,
         help="This task's index in the job array. Mines only this task's share "
         "of the repos into its own sharded files",
     )
-    array.add_argument(
+    parser.add_argument(
         "--num-tasks",
         type=int,
         default=None,
-        help="Total number of tasks in the job array. Splits the repos evenly "
-        "across tasks",
+        help="Total number of tasks in the job array. Mines only this task's share "
+        "of the repos into its own sharded files",
     )
-    array.add_argument(
-        "--repos-per-task",
+    parser.add_argument(
+        "--max-repos",
         type=int,
-        default=10,
-        help="Repos per array task; --prepare uses this to decide how many "
-        "tasks to create",
+        default=DEFAULT_MAX_REPOS,
+        help="Limit number of repos processed",
     )
-
-    limits = parser.add_argument_group("limits (for testing on smaller batches)")
-    limits.add_argument(
-        "--max-repos", type=int, default=1000, help="Limit number of repos processed"
-    )
-    limits.add_argument(
+    parser.add_argument(
         "--repo-min-stars",
         type=int,
         default=0,
         help="Only include repos with at least this many stars",
     )
-    limits.add_argument(
-        "--repo-min-contributors",
-        type=int,
-        default=0,
-        help="Drop repos with fewer than this many contributors",
-    )
 
-    args = parser.parse_args()
-
-    no_stage_selected = not any((args.prepare, args.collect, args.finalize))
-    if no_stage_selected:
-        args.collect = True
-
-    return args
+    return parser.parse_args()
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
-    if args.run_dir:
-        run_dir = Path(args.run_dir)
-        run_dir.mkdir(parents=True, exist_ok=True)
+    if args.dataset_dir:
+        dataset_directory = Path(args.dataset_dir)
+    elif args.new_dataset:
+        dataset_directory = create_new_dataset_directory()
     else:
-        run_dir = resolve_dataset_directory(create_new_run=(args.new_run or args.prepare))
-    logging.info("Using run directory: %s", run_dir)
+        dataset_directory = resolve_dataset_directory()
 
-    if args.prepare:
-        num_tasks = prepare_collection(
-            run_dir,
-            max_repos=args.max_repos,
-            repo_min_stars=args.repo_min_stars,
-            repos_per_task=args.repos_per_task,
-        )
-        # submit.sh uses these prints to parse the RUN_DIR and NUM_TASKS
-        print(f"RUN_DIR={run_dir}")
-        print(f"NUM_TASKS={num_tasks}")
-        return
-
-    if args.collect:
-        collect_dataset(
-            run_dir,
-            task_id=args.task_id,
-            num_tasks=args.num_tasks,
-            max_repos=args.max_repos,
-            repo_min_stars=args.repo_min_stars,
-        )
-    if args.finalize:
-        finalize_collection(run_dir)
+    _collect(
+        dataset_directory,
+        task_id=args.task_id,
+        num_tasks=args.num_tasks,
+        max_repos=args.max_repos,
+        repo_min_stars=args.repo_min_stars,
+    )
 
 
 if __name__ == "__main__":
