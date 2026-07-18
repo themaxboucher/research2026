@@ -4,7 +4,7 @@ import random
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from tqdm.auto import tqdm
-from collect.dataset import require_latest_dataset_directory
+from collect.dataset import latest_dataset_directory
 from storage import iter_from_jsonl, save_to_jsonl
 
 from collect.constants import DATA_FILENAME
@@ -72,13 +72,13 @@ def _reservoir_sample_commits(
 
 
 def sample_dataset(
-    run_dir: Path,
+    dataset_directory: Path,
     num_commits: int = DEFAULT_NUM_COMMITS,
     max_files_per_commit: int = DEFAULT_MAX_FILES_PER_COMMIT,
     seed: int | None = None,
 ) -> int:
     random_num_generator = random.Random(seed)
-    records: Iterator[dict] = iter_from_jsonl(run_dir, DATA_FILENAME)
+    records: Iterator[dict] = iter_from_jsonl(dataset_directory, DATA_FILENAME)
     sampled_commits = _reservoir_sample_commits(
         records, num_commits, max_files_per_commit, random_num_generator
     )
@@ -92,7 +92,7 @@ def sample_dataset(
         )
 
     sample = [record for group in sampled_commits for record in group]
-    save_to_jsonl(sample, run_dir, SAMPLE_FILENAME)
+    save_to_jsonl(sample, dataset_directory, SAMPLE_FILENAME)
     logging.info(
         "Wrote %d files from %d commits to %s.jsonl",
         len(sample),
@@ -102,10 +102,8 @@ def sample_dataset(
     return len(sample)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Sample whole commits (and all their files) from dataset.jsonl"
-    )
+def _parse_args():
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "--num-commits",
         type=int,
@@ -125,17 +123,25 @@ def main() -> None:
         help="Seed for reproducible sampling",
     )
     parser.add_argument(
-        "--run-dir",
+        "--dataset-dir",
         type=str,
         default=None,
-        help="Run directory to sample from (defaults to the latest run)",
+        help="Dataset directory to sample from (defaults to the latest dataset)",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    run_dir = Path(args.run_dir) if args.run_dir else require_latest_dataset_directory()
-    logging.info("Sampling from run directory: %s", run_dir)
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    args = _parse_args()
+
+    dataset_directory = (
+        Path(args.dataset_dir) if args.dataset_dir else latest_dataset_directory()
+    )
+    
+    logging.info("Sampling from dataset directory: %s", dataset_directory)
     sample_dataset(
-        run_dir,
+        dataset_directory,
         num_commits=args.num_commits,
         max_files_per_commit=args.max_files_per_commit,
         seed=args.seed,

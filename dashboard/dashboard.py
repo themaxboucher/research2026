@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import generate.generate as generate
 from generate.comments import apply_generated_comment, is_machine_directive_comment
-from collect.dataset import require_latest_dataset_directory
+from collect.dataset import latest_dataset_directory
 
 DATASET_FILENAME = "dataset_sample"
 REGENERATED_METRICS_FILENAME = "metrics_regenerate.json"
@@ -1071,7 +1071,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> None:
     args = _parse_args(argv)
-    run_dir = args.run_dir if args.run_dir is not None else require_latest_dataset_directory()
+    run_dir = args.run_dir if args.run_dir is not None else latest_dataset_directory()
     serve(run_dir, args.port, open_browser=not args.no_open)
 
 

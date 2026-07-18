@@ -37,7 +37,7 @@ def resolve_dataset_directory() -> Path:
     return create_new_dataset_directory()
 
 
-def require_latest_dataset_directory() -> Path:
+def latest_dataset_directory() -> Path:
     latest_dataset_directory = find_latest_dataset_directory()
     if latest_dataset_directory is None:
         raise SystemExit(

@@ -13,7 +13,7 @@ from typing import Callable, NamedTuple
 
 from generate.llms import openrouter
 from generate.llms import transformers
-from collect.dataset import require_latest_dataset_directory
+from collect.dataset import latest_dataset_directory
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
@@ -770,7 +770,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
-    run_dir = Path(args.run_dir) if args.run_dir else require_latest_dataset_directory()
+    run_dir = Path(args.run_dir) if args.run_dir else latest_dataset_directory()
     logging.info("Using run directory: %s", run_dir)
 
     approaches = [

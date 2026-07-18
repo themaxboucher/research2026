@@ -9,7 +9,7 @@ import evaluate
 from tqdm.auto import tqdm
 
 from generate.generate import LOCATION_FILENAME, REGENERATE_FILENAME, list_generations
-from collect.dataset import require_latest_dataset_directory
+from collect.dataset import latest_dataset_directory
 from storage import load_from_jsonl
 
 
@@ -340,7 +340,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     args = parse_args()
 
-    run_dir = Path(args.run_dir) if args.run_dir else require_latest_dataset_directory()
+    run_dir = Path(args.run_dir) if args.run_dir else latest_dataset_directory()
     generations = list_generations(run_dir)
     if args.generation:
         generations = [gen for gen in generations if gen["id"] == args.generation]
