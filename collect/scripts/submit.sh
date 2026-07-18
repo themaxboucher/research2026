@@ -67,7 +67,7 @@ DATASET_DIR="$(grep '^DATASET_DIR=' <<<"$PREP_OUT" | cut -d= -f2-)"
 NUM_TASKS="$(grep '^NUM_TASKS=' <<<"$PREP_OUT" | cut -d= -f2-)"
 
 if [[ -z "$DATASET_DIR" || -z "$NUM_TASKS" ]]; then
-  echo "Prep did not return RUN_DIR/NUM_TASKS:" >&2
+  echo "Prep did not return DATASET_DIR/NUM_TASKS:" >&2
   echo "$PREP_OUT" >&2
   exit 1
 fi

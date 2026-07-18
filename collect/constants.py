@@ -1,4 +1,7 @@
+from pathlib import Path
+
 DATASET_DIRECTORY_NAME = "datasets"
+DATASET_DIRECTORY = Path(__file__).parent.parent / DATASET_DIRECTORY_NAME
 DATA_FILENAME = "dataset"
 REPOS_CACHE_FILENAME = "repos_cache"
 MINNED_REPOS_FILENAME = "mined_repos"

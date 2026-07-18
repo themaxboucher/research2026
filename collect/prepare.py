@@ -9,7 +9,7 @@ from collect.constants import (
     REPO_LANGUAGE,
     CUTOFF_DATE,
 )
-from collect.dataset import create_new_dataset_directory
+from collect.dataset import create_new_dataset_directory, dataset_directory_from_argument
 from storage import load_from_jsonl, append_to_jsonl
 from collect.github import search_repos
 
@@ -56,7 +56,14 @@ def _parse_args():
         "--dataset-dir",
         type=str,
         default=None,
-        help="Use this exact dataset directory instead of picking one automatically",
+        help="Existing dataset directory to resume instead of creating a new one: "
+        "a timestamp name (resolved under datasets/) or a path ending in a timestamp",
+    )
+    parser.add_argument(
+        "--repos-per-task",
+        type=int,
+        default=DEFAULT_REPOS_PER_TASK,
+        help="Repos per array task",
     )
     parser.add_argument(
         "--max-repos",
@@ -70,12 +77,6 @@ def _parse_args():
         default=0,
         help="Only include repos with at least this many stars",
     )
-    parser.add_argument(
-        "--repos-per-task",
-        type=int,
-        default=DEFAULT_REPOS_PER_TASK,
-        help="Repos per array task",
-    )
 
     return parser.parse_args()
 
@@ -85,12 +86,12 @@ def main():
     args = _parse_args()
 
     if args.dataset_dir:
-        dataset_directory = Path(args.dataset_dir)
+        dataset_directory = dataset_directory_from_argument(args.dataset_dir)
         dataset_directory.mkdir(parents=True, exist_ok=True)
     else:
         dataset_directory = create_new_dataset_directory()
 
-    logging.info("Using dataset directory: %s", dataset_directory)
+    logging.info("Using dataset directory: %s", dataset_directory.name)
 
     num_tasks = _prepare(
         dataset_directory,
@@ -98,7 +99,7 @@ def main():
         repo_min_stars=args.repo_min_stars,
         repos_per_task=args.repos_per_task,
     )
-    # submit.sh uses these prints to parse the RUN_DIR and NUM_TASKS
+    # submit.sh uses these prints to parse the DATASET_DIR and NUM_TASKS
     print(f"DATASET_DIR={dataset_directory}")
     print(f"NUM_TASKS={num_tasks}")
     return

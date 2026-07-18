@@ -4,7 +4,7 @@ import random
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from tqdm.auto import tqdm
-from collect.dataset import latest_dataset_directory
+from collect.dataset import dataset_directory_from_argument, latest_dataset_directory
 from storage import iter_from_jsonl, save_to_jsonl
 
 from collect.constants import DATA_FILENAME
@@ -136,9 +136,11 @@ def main() -> None:
     args = _parse_args()
 
     dataset_directory = (
-        Path(args.dataset_dir) if args.dataset_dir else latest_dataset_directory()
+        dataset_directory_from_argument(args.dataset_dir)
+        if args.dataset_dir
+        else latest_dataset_directory()
     )
-    
+
     logging.info("Sampling from dataset directory: %s", dataset_directory)
     sample_dataset(
         dataset_directory,

@@ -9,6 +9,7 @@ from datetime import datetime
 
 from collect.prepare import get_repos
 from collect.dataset import (
+    dataset_directory_from_argument,
     dataset_directory_timestamp,
     resolve_dataset_directory,
 )
@@ -154,7 +155,7 @@ def _mine_and_persist_repo(
 
 
 def _collect(
-    run_dir: Path,
+    dataset_dir: Path,
     task_id: int | None = None,
     num_tasks: int | None = None,
     max_repos: int | None = None,
@@ -166,8 +167,8 @@ def _collect(
     else:
         data_filename, mined_filename = DATA_FILENAME, MINNED_REPOS_FILENAME
 
-    all_repos = get_repos(repo_min_stars, max_repos, run_dir)
-    mining_end = dataset_directory_timestamp(run_dir)
+    all_repos = get_repos(repo_min_stars, max_repos, dataset_dir)
+    mining_end = dataset_directory_timestamp(dataset_dir)
 
     sorted_repos = _sort_repos_by_size(all_repos)
 
@@ -177,9 +178,9 @@ def _collect(
     else:
         repos_partition = sorted_repos
 
-    _clean_previous_data(run_dir, data_filename, mined_filename)
+    _clean_previous_data(dataset_dir, data_filename, mined_filename)
 
-    repos = _unmined_repos(repos_partition, run_dir, mined_filename)
+    repos = _unmined_repos(repos_partition, dataset_dir, mined_filename)
 
     if not repos:
         logging.info("No repositories left to mine for this task")
@@ -195,7 +196,7 @@ def _collect(
             executor.submit(
                 _mine_and_persist_repo,
                 repo,
-                run_dir,
+                dataset_dir,
                 write_lock,
                 data_filename,
                 mined_filename,
@@ -220,7 +221,8 @@ def _parse_args():
         "--dataset-dir",
         type=str,
         default=None,
-        help="Use this exact dataset directory instead of defaulting to the latest timestamped directory",
+        help="Dataset directory to use instead of the latest one: a timestamp name "
+        "(resolved under datasets/) or a path ending in a timestamp",
     )
     parser.add_argument(
         "--task-id",
@@ -251,12 +253,13 @@ def _parse_args():
 
     return parser.parse_args()
 
+
 def main():
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
     if args.dataset_dir:
-        dataset_directory = Path(args.dataset_dir)
+        dataset_directory = dataset_directory_from_argument(args.dataset_dir)
     else:
         dataset_directory = resolve_dataset_directory()
 

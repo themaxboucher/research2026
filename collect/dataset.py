@@ -1,9 +1,28 @@
 from datetime import datetime
 from pathlib import Path
-from collect.constants import DATASET_DIRECTORY_NAME
+from collect.constants import DATASET_DIRECTORY
 
-DATASET_DIRECTORY = Path(__file__).parent / DATASET_DIRECTORY_NAME
 DATASET_TIMESTAMP_FORMAT = "%Y-%m-%dT%H-%M-%S"
+
+
+def is_dataset_timestamp_format(directory_name: str) -> bool:
+    try:
+        datetime.strptime(directory_name, DATASET_TIMESTAMP_FORMAT)
+        return True
+    except ValueError:
+        return False
+
+
+def dataset_directory_from_argument(dataset_dir_argument: str) -> Path:
+    dataset_directory = Path(dataset_dir_argument)
+    if not is_dataset_timestamp_format(dataset_directory.name):
+        raise SystemExit(
+            f"Invalid dataset directory '{dataset_dir_argument}': the directory "
+            "name must be a timestamp in the format YYYY-MM-DDTHH-MM-SS"
+        )
+    if dataset_directory.parent == Path("."):
+        return DATASET_DIRECTORY / dataset_directory.name
+    return dataset_directory
 
 
 def create_new_dataset_directory() -> Path:
@@ -30,17 +49,17 @@ def find_latest_dataset_directory() -> Path | None:
 
 
 def resolve_dataset_directory() -> Path:
-    latest_dataset_directory = find_latest_dataset_directory()
-    if latest_dataset_directory is not None:
-        return latest_dataset_directory
+    latest_directory = find_latest_dataset_directory()
+    if latest_directory is not None:
+        return latest_directory
 
     return create_new_dataset_directory()
 
 
 def latest_dataset_directory() -> Path:
-    latest_dataset_directory = find_latest_dataset_directory()
-    if latest_dataset_directory is None:
+    latest_directory = find_latest_dataset_directory()
+    if latest_directory is None:
         raise SystemExit(
             "No dataset directory found."
         )
-    return latest_dataset_directory
+    return latest_directory
