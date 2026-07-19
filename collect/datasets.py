@@ -2,12 +2,12 @@ from datetime import datetime
 from pathlib import Path
 from collect.constants import DATASET_DIRECTORY
 
-DATASET_TIMESTAMP_FORMAT = "%Y-%m-%dT%H-%M-%S"
+TIMESTAMP_FORMAT = "%Y-%m-%dT%H-%M-%S"
 
 
 def is_dataset_timestamp_format(directory_name: str) -> bool:
     try:
-        datetime.strptime(directory_name, DATASET_TIMESTAMP_FORMAT)
+        datetime.strptime(directory_name, TIMESTAMP_FORMAT)
         return True
     except ValueError:
         return False
@@ -26,13 +26,13 @@ def dataset_directory_from_argument(dataset_dir_argument: str) -> Path:
 
 
 def create_new_dataset_directory() -> Path:
-    new_dataset_directory = DATASET_DIRECTORY / datetime.now().strftime(DATASET_TIMESTAMP_FORMAT)
+    new_dataset_directory = DATASET_DIRECTORY / datetime.now().strftime(TIMESTAMP_FORMAT)
     new_dataset_directory.mkdir(parents=True, exist_ok=True)
     return new_dataset_directory
 
 
 def dataset_directory_timestamp(dataset_directory: Path) -> datetime:
-    return datetime.strptime(dataset_directory.name, DATASET_TIMESTAMP_FORMAT)
+    return datetime.strptime(dataset_directory.name, TIMESTAMP_FORMAT)
 
 
 def find_latest_dataset_directory() -> Path | None:

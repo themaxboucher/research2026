@@ -9,7 +9,7 @@ from pydriller import Repository
 from datetime import datetime
 
 from collect.repos import get_repos
-from collect.dataset import (
+from collect.datasets import (
     dataset_directory_from_argument,
     dataset_directory_timestamp,
     resolve_dataset_directory,

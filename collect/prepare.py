@@ -6,7 +6,7 @@ from collect.constants import (
     DEFAULT_MAX_REPOS,
     DEFAULT_REPOS_PER_TASK,
 )
-from collect.dataset import (
+from collect.datasets import (
     create_new_dataset_directory,
     dataset_directory_from_argument,
 )
