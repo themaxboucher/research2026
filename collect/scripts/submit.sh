@@ -1,13 +1,13 @@
 #!/bin/bash
 #
 # Usage:
-#   ./submit.sh                         Fresh run with defaults
-#   ./submit.sh --dataset-dir <timestamp>       Resume an existing dataset (reuses its cache)
-#   ./submit.sh --array 3,7,12          Submit only these task indices (resume)
-#   ./submit.sh --repos-per-task 10     Repos per task (default 10)
-#   ./submit.sh --throttle 20           Max concurrent array tasks (default 20)
-#   ./submit.sh --max-repos 1000        Cap repos searched (passed to --prepare)
-#   ./submit.sh --repo-min-stars 50     Min stars filter (passed to --prepare)
+#   ./submit.sh                             Fresh run with defaults
+#   ./submit.sh --dataset-dir <timestamp>   Resume an existing dataset (reuses its cache)
+#   ./submit.sh --array 3,7,12              Submit only these task indices (resume)
+#   ./submit.sh --repos-per-task 10         Repos per task (default 10)
+#   ./submit.sh --throttle 20               Max concurrent array tasks (default 20)
+#   ./submit.sh --max-repos 1000            Cap repos searched (passed to --prepare)
+#   ./submit.sh --repo-min-stars 50         Min stars filter (passed to --prepare)
 
 set -euo pipefail
 
