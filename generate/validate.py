@@ -1,6 +1,5 @@
 import re
 
-
 # Directive tokens that end in ":", which acts as the delimiter (e.g.
 # "type: ignore", "type:ignore", "pragma: no cover"). Matched at the start of a
 # comment body, case-insensitively, followed by a literal colon.

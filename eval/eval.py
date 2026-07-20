@@ -9,9 +9,8 @@ import evaluate
 from tqdm.auto import tqdm
 
 from generate.constants import LOCATION_FILENAME, REGENERATE_FILENAME
-from storage.runs import resolve_dataset_and_run
 from storage import load_from_jsonl
-
+from storage.runs import resolve_dataset_and_run
 
 LOCATION_METRICS_FILENAME = "location_metrics.json"
 REGENERATE_METRICS_FILENAME = "regenerate_metrics.json"

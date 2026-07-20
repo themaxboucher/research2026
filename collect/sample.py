@@ -3,11 +3,12 @@ import logging
 import random
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+
 from tqdm.auto import tqdm
-from storage.datasets import dataset_directory_from_argument, latest_dataset_directory
-from storage import iter_from_jsonl, save_to_jsonl
 
 from collect.constants import DATA_FILENAME
+from storage import iter_from_jsonl, save_to_jsonl
+from storage.datasets import dataset_directory_from_argument, latest_dataset_directory
 
 SAMPLE_FILENAME = "dataset_sample"
 DEFAULT_NUM_COMMITS = 100

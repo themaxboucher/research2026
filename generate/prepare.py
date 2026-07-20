@@ -2,10 +2,10 @@ import argparse
 import logging
 from pathlib import Path
 
-from generate.models import get_model_profile
+from generate.approaches import APPROACHES, approaches_from_argument
 from generate.constants import SOURCE_FILENAME
-from storage.runs import resolve_dataset_and_run, read_manifest, write_manifest
-from generate.approaches import approaches_from_argument, APPROACHES
+from generate.models import get_model_profile
+from storage.runs import read_manifest, resolve_dataset_and_run, write_manifest
 
 
 def _prepare(

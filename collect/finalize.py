@@ -1,9 +1,9 @@
-from pathlib import Path
 import argparse
 import logging
+from pathlib import Path
 
-from storage import merge_jsonl_shards
 from collect.constants import DATA_FILENAME, MINED_REPOS_FILENAME
+from storage import merge_jsonl_shards
 from storage.datasets import resolve_dataset_directory
 
 

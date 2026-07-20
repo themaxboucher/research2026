@@ -1,8 +1,8 @@
 import os
 from typing import Callable, NamedTuple
 
-from generate.providers import openrouter
-from generate.providers import transformers
+from generate.providers import openrouter, transformers
+
 
 class ModelProfile(NamedTuple):
     model_names: list[str]

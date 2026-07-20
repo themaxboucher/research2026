@@ -19,6 +19,12 @@ dependencies = [
     "transformers>=5.9.0",
 ]
 
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["collect", "generate", "eval", "storage"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 

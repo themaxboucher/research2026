@@ -1,29 +1,30 @@
 import argparse
 import logging
 import time
-from tqdm.auto import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from pydriller import Repository
-from datetime import datetime
 
-from collect.repos import get_repos
-from storage.datasets import (
-    dataset_directory_timestamp,
-    resolve_dataset_directory,
+from pydriller import Repository
+from tqdm.auto import tqdm
+
+from collect.constants import (
+    CUTOFF_DATE,
+    DATA_FILENAME,
+    DEFAULT_MAX_REPOS,
+    MINED_REPOS_FILENAME,
 )
+from collect.repos import get_repos
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
     load_from_jsonl,
     truncate_broken_tail,
 )
-from collect.constants import (
-    DATA_FILENAME,
-    MINED_REPOS_FILENAME,
-    CUTOFF_DATE,
-    DEFAULT_MAX_REPOS,
+from storage.datasets import (
+    dataset_directory_timestamp,
+    resolve_dataset_directory,
 )
 
 

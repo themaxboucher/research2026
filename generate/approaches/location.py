@@ -4,15 +4,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
 from generate.comments import extract_comments
-from generate.models import ModelProfile
-from generate.validate import target_comments
 from generate.model_output import strip_output_wrappers
-from generate.prompt import build_location_prompt
+from generate.models import ModelProfile
 from generate.parse_code import (
     enclosing_scope_name as _enclosing_scope_name,
+)
+from generate.parse_code import (
     local_scope_bounds as _local_scope_bounds,
+)
+from generate.parse_code import (
     scope_code as _scope_code,
 )
+from generate.prompt import build_location_prompt
+from generate.validate import target_comments
 
 
 def _diff_region_bounds(

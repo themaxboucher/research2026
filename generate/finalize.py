@@ -1,14 +1,14 @@
-import logging
 import argparse
+import logging
 from pathlib import Path
 
 from generate.constants import (
     LOCATION_FILENAME,
-    REGENERATE_FILENAME,
     PROGRESS_FILENAME,
+    REGENERATE_FILENAME,
 )
+from storage.jsonl import iter_from_jsonl, merge_jsonl_shards
 from storage.runs import resolve_dataset_and_run
-from storage.jsonl import merge_jsonl_shards, iter_from_jsonl
 
 
 def _finalize(run_dir: Path) -> None:

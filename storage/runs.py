@@ -1,9 +1,8 @@
 import json
 import logging
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import timezone
 
 from storage.datasets import dataset_directory_from_argument, latest_dataset_directory
 from storage.timestamped_dirs import (

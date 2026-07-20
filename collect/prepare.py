@@ -1,13 +1,14 @@
-from pathlib import Path
-import math
-import logging
 import argparse
+import logging
+import math
+from pathlib import Path
+
 from collect.constants import (
     DEFAULT_MAX_REPOS,
     DEFAULT_REPOS_PER_TASK,
 )
-from storage.datasets import resolve_dataset_directory
 from collect.repos import get_repos
+from storage.datasets import resolve_dataset_directory
 
 
 def _prepare(
