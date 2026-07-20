@@ -4,7 +4,7 @@ import logging
 
 from storage import merge_jsonl_shards
 from collect.constants import DATA_FILENAME, MINED_REPOS_FILENAME
-from storage.datasets import dataset_directory_from_argument
+from storage.datasets import resolve_dataset_directory
 
 
 def _finalize(dataset_directory: Path) -> None:
@@ -38,7 +38,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
-    dataset_directory = dataset_directory_from_argument(args.dataset_dir)
+    dataset_directory = resolve_dataset_directory(args.dataset_dir)
 
     _finalize(dataset_directory)
 

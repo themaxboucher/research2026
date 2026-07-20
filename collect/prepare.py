@@ -6,10 +6,7 @@ from collect.constants import (
     DEFAULT_MAX_REPOS,
     DEFAULT_REPOS_PER_TASK,
 )
-from storage.datasets import (
-    create_new_dataset_directory,
-    dataset_directory_from_argument,
-)
+from storage.datasets import resolve_dataset_directory
 from collect.repos import get_repos
 
 
@@ -65,13 +62,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
-    if args.dataset_dir:
-        dataset_directory = dataset_directory_from_argument(args.dataset_dir)
-        dataset_directory.mkdir(parents=True, exist_ok=True)
-    else:
-        dataset_directory = create_new_dataset_directory()
-
-    logging.info("Using dataset directory: %s", dataset_directory.name)
+    dataset_directory = resolve_dataset_directory(args.dataset_dir, create_dataset=True)
 
     num_tasks = _prepare(
         dataset_directory,

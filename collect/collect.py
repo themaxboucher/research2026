@@ -10,7 +10,6 @@ from datetime import datetime
 
 from collect.repos import get_repos
 from storage.datasets import (
-    dataset_directory_from_argument,
     dataset_directory_timestamp,
     resolve_dataset_directory,
 )
@@ -287,10 +286,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
-    if args.dataset_dir:
-        dataset_directory = dataset_directory_from_argument(args.dataset_dir)
-    else:
-        dataset_directory = resolve_dataset_directory()
+    dataset_directory = resolve_dataset_directory(args.dataset_dir)
 
     _collect(
         dataset_directory,

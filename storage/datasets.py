@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -31,7 +32,7 @@ def find_latest_dataset_directory() -> Path | None:
     return find_latest_timestamped_directory(DATASET_DIRECTORY)
 
 
-def resolve_dataset_directory() -> Path:
+def _latest_or_new_dataset_directory() -> Path:
     latest_directory = find_latest_dataset_directory()
     if latest_directory is not None:
         return latest_directory
@@ -44,3 +45,28 @@ def latest_dataset_directory() -> Path:
     if latest_directory is None:
         raise SystemExit("No dataset directory found.")
     return latest_directory
+
+
+def resolve_dataset_directory(
+    dataset_dir_arg: str | None,
+    *,
+    create_dataset: bool = False,
+) -> Path:
+    """Resolve the ``--dataset-dir`` CLI argument to a dataset directory, logging the choice.
+
+    With an argument, resolve it to a path — created when `create_dataset` is
+    set, so preparation can start a dataset at a chosen timestamp. With no
+    argument and `create_dataset` set, start a new timestamped dataset
+    (preparation); otherwise fall back to the latest existing dataset, creating
+    one only if none exist yet.
+    """
+    if dataset_dir_arg:
+        dataset_directory = dataset_directory_from_argument(dataset_dir_arg)
+        if create_dataset:
+            dataset_directory.mkdir(parents=True, exist_ok=True)
+    elif create_dataset:
+        dataset_directory = create_new_dataset_directory()
+    else:
+        dataset_directory = _latest_or_new_dataset_directory()
+    logging.info("Using dataset directory: %s", dataset_directory)
+    return dataset_directory

@@ -1,11 +1,3 @@
-"""Helpers for the timestamp-named directories used across the pipeline.
-
-Datasets (``datasets/<timestamp>/``) and generation runs
-(``datasets/<timestamp>/runs/<timestamp>/``) share the same naming scheme, so
-the logic for creating, resolving, and finding the latest of them lives here,
-parameterized by the base directory they live under.
-"""
-
 from datetime import datetime
 from pathlib import Path
 
