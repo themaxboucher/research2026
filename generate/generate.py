@@ -15,8 +15,10 @@ from storage import (
 )
 from generate.comments import get_comments_from_file
 from generate.models import ModelProfile, get_model_profile
-from generate.location_generate import location_generate_for_file
-from generate.regenerate_generate import regenerate_generate_for_file
+from generate.approaches import (
+    location_generate_for_file,
+    regenerate_generate_for_file,
+)
 from storage.runs import (
     read_manifest,
     resolve_dataset_and_run,

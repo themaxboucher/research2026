@@ -1,6 +1,9 @@
 # These are the approaches we use to prompt the LLMs. Different approaches produce
 # different types of outputs (e.g. generate only the comment vs regenerate the
 # whole code with comments added).
+from generate.approaches.location import location_generate_for_file
+from generate.approaches.regenerate import regenerate_generate_for_file
+
 APPROACHES = ("location", "regenerate")
 
 def approaches_from_argument(approaches_arg: str | None) -> list[str]:
@@ -15,3 +18,11 @@ def approaches_from_argument(approaches_arg: str | None) -> list[str]:
             f"Expected any of: {', '.join(APPROACHES)}"
         )
     return approaches
+
+
+__all__ = [
+    "APPROACHES",
+    "approaches_from_argument",
+    "location_generate_for_file",
+    "regenerate_generate_for_file",
+]
