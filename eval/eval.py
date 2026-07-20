@@ -8,8 +8,8 @@ from pathlib import Path
 import evaluate
 from tqdm.auto import tqdm
 
-from generate.generate import LOCATION_FILENAME, REGENERATE_FILENAME, list_generations
-from collect.datasets import latest_dataset_directory
+from generate.constants import LOCATION_FILENAME, REGENERATE_FILENAME
+from generate.runs import resolve_dataset_and_run
 from storage import load_from_jsonl
 
 
@@ -132,8 +132,8 @@ def _write_records_atomically(records: list[dict], jsonl_path: Path) -> None:
     os.replace(temp_path, jsonl_path)
 
 
-def _write_metrics(records: list[dict], gen_dir: Path, scorer: CommentScorer) -> None:
-    """Per-model aggregates saved to metrics.json in the generation directory.
+def _write_metrics(records: list[dict], run_dir: Path, scorer: CommentScorer) -> None:
+    """Per-model aggregates saved to location_metrics.json in the run directory.
 
     BLEU is corpus-level, so it is recomputed from the normalized texts of all
     usable results rather than averaged from the per-pair sentence scores.
@@ -164,7 +164,7 @@ def _write_metrics(records: list[dict], gen_dir: Path, scorer: CommentScorer) ->
             "bertscore_f1": sum(scores["bertscore_f1"]) / len(scores["bertscore_f1"]),
         }
 
-    metrics_path = gen_dir / LOCATION_METRICS_FILENAME
+    metrics_path = run_dir / LOCATION_METRICS_FILENAME
     metrics_path.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -202,9 +202,9 @@ def _collect_unscored_regenerations(
 
 
 def _write_regeneration_metrics(
-    records: list[dict], gen_dir: Path, scorer: CommentScorer
+    records: list[dict], run_dir: Path, scorer: CommentScorer
 ) -> None:
-    """Per-model aggregates saved to metrics_regenerate.json in the generation
+    """Per-model aggregates saved to regenerate_metrics.json in the run
     directory. Alongside the text metrics (computed over placement hits only),
     each model gets: regen_failure_rate — scope regenerations rejected because
     the code changed or the output didn't parse; placement_recall — targets
@@ -263,70 +263,70 @@ def _write_regeneration_metrics(
             )
         metrics[model] = model_metrics
 
-    metrics_path = gen_dir / REGENERATE_METRICS_FILENAME
+    metrics_path = run_dir / REGENERATE_METRICS_FILENAME
     metrics_path.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
 
 def _evaluate_location_generation(
-    gen_dir: Path, scorer: CommentScorer, force: bool
+    run_dir: Path, scorer: CommentScorer, force: bool
 ) -> None:
-    records = load_from_jsonl(gen_dir, LOCATION_FILENAME)
+    records = load_from_jsonl(run_dir, LOCATION_FILENAME)
     pending = _collect_unscored(records, force)
 
     if pending:
         predictions = [prediction for _, prediction, _ in pending]
         references = [reference for _, _, reference in pending]
-        desc = f"Scoring {gen_dir.name}"
+        desc = f"Scoring {run_dir.name}"
         for (result, _, _), scores in zip(
             pending, scorer.score_pairs(predictions, references, desc=desc)
         ):
             result["scores"] = scores
 
-    _write_records_atomically(records, gen_dir / f"{LOCATION_FILENAME}.jsonl")
-    logging.info("Scored %d new results in %s", len(pending), gen_dir)
-    _write_metrics(records, gen_dir, scorer)
+    _write_records_atomically(records, run_dir / f"{LOCATION_FILENAME}.jsonl")
+    logging.info("Scored %d new results in %s", len(pending), run_dir)
+    _write_metrics(records, run_dir, scorer)
 
 
-def _evaluate_regeneration(gen_dir: Path, scorer: CommentScorer, force: bool) -> None:
-    records = load_from_jsonl(gen_dir, REGENERATE_FILENAME)
+def _evaluate_regeneration(run_dir: Path, scorer: CommentScorer, force: bool) -> None:
+    records = load_from_jsonl(run_dir, REGENERATE_FILENAME)
     pending = _collect_unscored_regenerations(records, force)
 
     if pending:
         predictions = [prediction for _, prediction, _ in pending]
         references = [reference for _, _, reference in pending]
-        desc = f"Scoring {gen_dir.name} (regenerate)"
+        desc = f"Scoring {run_dir.name} (regenerate)"
         for (extraction, _, _), scores in zip(
             pending, scorer.score_pairs(predictions, references, desc=desc)
         ):
             extraction["scores"] = scores
 
-    _write_records_atomically(records, gen_dir / f"{REGENERATE_FILENAME}.jsonl")
-    logging.info("Scored %d new regeneration results in %s", len(pending), gen_dir)
-    _write_regeneration_metrics(records, gen_dir, scorer)
+    _write_records_atomically(records, run_dir / f"{REGENERATE_FILENAME}.jsonl")
+    logging.info("Scored %d new regeneration results in %s", len(pending), run_dir)
+    _write_regeneration_metrics(records, run_dir, scorer)
 
 
-def evaluate_generation(gen_dir: Path, scorer: CommentScorer, force: bool) -> None:
-    if (gen_dir / f"{LOCATION_FILENAME}.jsonl").exists():
-        _evaluate_location_generation(gen_dir, scorer, force)
-    if (gen_dir / f"{REGENERATE_FILENAME}.jsonl").exists():
-        _evaluate_regeneration(gen_dir, scorer, force)
+def evaluate_run(run_dir: Path, scorer: CommentScorer, force: bool) -> None:
+    if (run_dir / f"{LOCATION_FILENAME}.jsonl").exists():
+        _evaluate_location_generation(run_dir, scorer, force)
+    if (run_dir / f"{REGENERATE_FILENAME}.jsonl").exists():
+        _evaluate_regeneration(run_dir, scorer, force)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--dataset-dir",
+        type=str,
+        default=None,
+        help="Dataset directory to evaluate for (defaults to the latest dataset)",
+    )
+    parser.add_argument(
         "--run-dir",
         type=str,
         default=None,
-        help="Run directory to evaluate (defaults to the latest run)",
-    )
-    parser.add_argument(
-        "--generation",
-        type=str,
-        default=None,
-        help="Only evaluate this generation label (defaults to all in the run)",
+        help="Run directory to evaluate (defaults to the latest run in the dataset)",
     )
     parser.add_argument(
         "--force",
@@ -340,18 +340,17 @@ def main():
     logging.basicConfig(level=logging.INFO)
     args = parse_args()
 
-    run_dir = Path(args.run_dir) if args.run_dir else latest_dataset_directory()
-    generations = list_generations(run_dir)
-    if args.generation:
-        generations = [gen for gen in generations if gen["id"] == args.generation]
-        if not generations:
-            raise SystemExit(f"No generation '{args.generation}' in {run_dir}")
-    if not generations:
-        raise SystemExit(f"No generations with output found in {run_dir}")
+    _, run_directory = resolve_dataset_and_run(args.dataset_dir, args.run_dir)
+
+    has_output = any(
+        (run_directory / f"{filename}.jsonl").exists()
+        for filename in (LOCATION_FILENAME, REGENERATE_FILENAME)
+    )
+    if not has_output:
+        raise SystemExit(f"No generation output found in {run_directory}")
 
     scorer = CommentScorer()
-    for generation in tqdm(generations, desc="Generations", unit="gen"):
-        evaluate_generation(generation["dir"], scorer, force=args.force)
+    evaluate_run(run_directory, scorer, force=args.force)
 
 
 if __name__ == "__main__":

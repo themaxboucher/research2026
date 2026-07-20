@@ -53,32 +53,6 @@ def _sharded(filename: str, suffix: str | None) -> str:
     return f"{filename}.{suffix}" if suffix is not None else filename
 
 
-def list_generations(run_dir: Path) -> list[dict]:
-    """Generations produced for a run.
-
-    The flat layout has no per-label generation subdirectories: a run directory
-    holds one generation's merged output files directly. So this returns a single
-    generation for the run, or an empty list if the run produced no output.
-    """
-    has_output = any(
-        (run_dir / f"{filename}.jsonl").exists()
-        for filename in (LOCATION_FILENAME, REGENERATE_FILENAME)
-    )
-    if not has_output:
-        return []
-    manifest = read_manifest(run_dir)
-    return [
-        {
-            "id": run_dir.name,
-            "created_at": manifest.get("created_at"),
-            "model_profile": manifest.get("model_profile"),
-            "model_names": manifest.get("model_names") or [],
-            "config": manifest.get("config") or {},
-            "dir": run_dir,
-        }
-    ]
-
-
 def _with_parsed_comments(files_data):
     """Annotate each streamed file record with its parsed code comments."""
     for file_data in files_data:
