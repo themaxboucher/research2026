@@ -5,7 +5,6 @@ import tokenize
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 
-from collect.datasets import dataset_directory_from_argument, latest_dataset_directory
 from generate.validate import is_eligible_file
 from storage import (
     append_to_jsonl,
@@ -18,8 +17,7 @@ from generate.comments import get_comments_from_file
 from generate.models import ModelProfile, get_model_profile
 from generate.runs import (
     read_manifest,
-    run_directory_from_argument,
-    latest_run_directory,
+    resolve_dataset_and_run,
     MANIFEST_FILENAME,
 )
 from generate.constants import (
@@ -54,7 +52,29 @@ def _sharded(filename: str, suffix: str | None) -> str:
 
 
 def list_generations(run_dir: Path) -> list[dict]:
-    pass
+    """Generations produced for a run.
+
+    The flat layout has no per-label generation subdirectories: a run directory
+    holds one generation's merged output files directly. So this returns a single
+    generation for the run, or an empty list if the run produced no output.
+    """
+    has_output = any(
+        (run_dir / f"{filename}.jsonl").exists()
+        for filename in (LOCATION_FILENAME, REGENERATE_FILENAME)
+    )
+    if not has_output:
+        return []
+    manifest = read_manifest(run_dir)
+    return [
+        {
+            "id": run_dir.name,
+            "created_at": manifest.get("created_at"),
+            "model_profile": manifest.get("model_profile"),
+            "model_names": manifest.get("model_names") or [],
+            "config": manifest.get("config") or {},
+            "dir": run_dir,
+        }
+    ]
 
 
 def _with_parsed_comments(files_data):
@@ -309,17 +329,14 @@ def main():
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
-    if args.dataset_dir:
-        dataset_directory = dataset_directory_from_argument(args.dataset_dir)
-    else:
-        dataset_directory = latest_dataset_directory()
-    logging.info("Using dataset directory: %s", dataset_directory)
+    dataset_directory, run_directory = resolve_dataset_and_run(
+        args.dataset_dir, args.run_dir
+    )
 
-    if args.run_dir:
-        run_directory = run_directory_from_argument(args.run_dir, dataset_directory)
-    else:
-        run_directory = latest_run_directory(dataset_directory)
-    logging.info("Using run directory: %s", run_directory)
+    if args.task_id is None:
+        raise SystemExit(
+            "--task-id is required: it is this task's index in the job array"
+        )
 
     _generate_for_task(dataset_directory, run_directory, task_id=args.task_id)
 

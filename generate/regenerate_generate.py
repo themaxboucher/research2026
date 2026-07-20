@@ -5,7 +5,7 @@ import tokenize
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import NamedTuple
 
-from generate.generate import _target_comments
+from generate.validate import target_comments
 from generate.model_output import strip_code_output_wrappers
 from generate.prompt import build_regenerate_prompt
 from generate.parse_code import scope_bounds
@@ -366,11 +366,11 @@ def regenerate_generate_for_file(file_data: dict, model_profile) -> list[dict]:
     source_code = file_data["source_code"]
 
     scope_records = []
-    target_comments = _target_comments(file_data)
+    targets = target_comments(file_data)
 
-    # Multiple target comments may sit in the same local scope. We group them so that when an LLM regenerates 
+    # Multiple target comments may sit in the same local scope. We group them so that when an LLM regenerates
     # the scope we can compare the added comments against all the target comments in that scope.
-    for scope_group in _group_targets_by_scope(source_code, target_comments):
+    for scope_group in _group_targets_by_scope(source_code, targets):
         try:
             scope_records.append(
                 _scope_regeneration(file_data, source_code, scope_group, model_profile)

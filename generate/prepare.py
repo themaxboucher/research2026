@@ -3,9 +3,8 @@ import logging
 from pathlib import Path
 
 from generate.models import get_model_profile
-from collect.datasets import dataset_directory_from_argument, latest_dataset_directory
 from generate.constants import SOURCE_FILENAME
-from generate.runs import create_new_run_directory, run_directory_from_argument, read_manifest, write_manifest
+from generate.runs import resolve_dataset_and_run, read_manifest, write_manifest
 from generate.approaches import approaches_from_argument, APPROACHES
 
 
@@ -102,19 +101,9 @@ def main():
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
 
-    if args.dataset_dir:
-        dataset_directory = dataset_directory_from_argument(args.dataset_dir)
-    else:
-        dataset_directory = latest_dataset_directory()
-
-    logging.info("Using dataset directory: %s", dataset_directory.name)
-
-    if args.run_dir:
-        run_directory = run_directory_from_argument(args.run_dir, dataset_directory)
-    else:
-        run_directory = create_new_run_directory(dataset_directory)
-    
-    logging.info("Using run directory: %s", run_directory.name)
+    dataset_directory, run_directory = resolve_dataset_and_run(
+        args.dataset_dir, args.run_dir, create_run=True
+    )
 
     approaches = approaches_from_argument(args.approaches)
 

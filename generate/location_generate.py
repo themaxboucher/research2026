@@ -4,7 +4,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
 from generate.comments import extract_comments
-from generate.generate import ModelProfile, _target_comments
+from generate.models import ModelProfile
+from generate.validate import target_comments
 from generate.model_output import strip_output_wrappers
 from generate.prompt import build_location_prompt
 from generate.parse_code import (
@@ -313,7 +314,7 @@ def _comment_generation(
 
 def location_generate_for_file(file_data: dict, model_profile: ModelProfile) -> dict:
     comment_generations = []
-    for comment_data in _target_comments(file_data):
+    for comment_data in target_comments(file_data):
         try:
             comment_generations.append(
                 _comment_generation(file_data, comment_data, model_profile)

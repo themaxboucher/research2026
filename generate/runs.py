@@ -1,9 +1,11 @@
 import json
+import logging
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from datetime import timezone
 
+from collect.datasets import dataset_directory_from_argument, latest_dataset_directory
 from generate.constants import RUNS_DIRECTORY_NAME, MANIFEST_FILENAME
 
 
@@ -109,3 +111,32 @@ def read_manifest(run_dir: Path) -> dict:
     if manifest_path.exists():
         return json.loads(manifest_path.read_text(encoding="utf-8"))
     return {}
+
+
+def resolve_dataset_and_run(
+    dataset_dir_arg: str | None,
+    run_dir_arg: str | None,
+    *,
+    create_run: bool = False,
+) -> tuple[Path, Path]:
+    """Resolve the dataset and run directories from CLI arguments.
+
+    The dataset defaults to the latest dataset. The run defaults to a new
+    timestamped directory when `create_run` is set (preparation) or the latest
+    existing run otherwise (generation, finalization). Both choices are logged.
+    """
+    if dataset_dir_arg:
+        dataset_directory = dataset_directory_from_argument(dataset_dir_arg)
+    else:
+        dataset_directory = latest_dataset_directory()
+    logging.info("Using dataset directory: %s", dataset_directory)
+
+    if run_dir_arg:
+        run_directory = run_directory_from_argument(run_dir_arg, dataset_directory)
+    elif create_run:
+        run_directory = create_new_run_directory(dataset_directory)
+    else:
+        run_directory = latest_run_directory(dataset_directory)
+    logging.info("Using run directory: %s", run_directory)
+
+    return dataset_directory, run_directory
