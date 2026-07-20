@@ -5,59 +5,33 @@ from datetime import datetime
 from pathlib import Path
 from datetime import timezone
 
-from collect.datasets import dataset_directory_from_argument, latest_dataset_directory
-from generate.constants import RUNS_DIRECTORY_NAME, MANIFEST_FILENAME
+from storage.datasets import dataset_directory_from_argument, latest_dataset_directory
+from storage.timestamped_dirs import (
+    find_latest_timestamped_directory,
+    new_timestamped_directory,
+    resolve_timestamped_argument,
+)
 
-
-TIMESTAMP_FORMAT = "%Y-%m-%dT%H-%M-%S"
+RUNS_DIRECTORY_NAME = "runs"
+MANIFEST_FILENAME = "run.json"
 
 
 def runs_root(dataset_directory: Path) -> Path:
     return dataset_directory / RUNS_DIRECTORY_NAME
 
 
-def is_run_timestamp_format(directory_name: str) -> bool:
-    try:
-        datetime.strptime(directory_name, TIMESTAMP_FORMAT)
-        return True
-    except ValueError:
-        return False
-
-
 def run_directory_from_argument(run_dir_argument: str, dataset_directory: Path) -> Path:
-    run_directory = Path(run_dir_argument)
-    if not is_run_timestamp_format(run_directory.name):
-        raise SystemExit(
-            f"Invalid run directory '{run_dir_argument}': the directory "
-            "name must be a timestamp in the format YYYY-MM-DDTHH-MM-SS"
-        )
-    if run_directory.parent == Path("."):
-        return runs_root(dataset_directory) / run_directory.name
-    return run_directory
+    return resolve_timestamped_argument(
+        run_dir_argument, runs_root(dataset_directory), label="run directory"
+    )
 
 
 def create_new_run_directory(dataset_directory: Path) -> Path:
-    new_run_directory = runs_root(dataset_directory) / datetime.now().strftime(
-        TIMESTAMP_FORMAT
-    )
-    new_run_directory.mkdir(parents=True, exist_ok=True)
-    return new_run_directory
-
-
-def run_directory_timestamp(run_directory: Path) -> datetime:
-    return datetime.strptime(run_directory.name, TIMESTAMP_FORMAT)
+    return new_timestamped_directory(runs_root(dataset_directory))
 
 
 def find_latest_run_directory(dataset_directory: Path) -> Path | None:
-    root = runs_root(dataset_directory)
-    if not root.exists():
-        return None
-
-    existing_run_directories = sorted(path for path in root.iterdir() if path.is_dir())
-    if not existing_run_directories:
-        return None
-
-    return existing_run_directories[-1]
+    return find_latest_timestamped_directory(runs_root(dataset_directory))
 
 
 def latest_run_directory(dataset_directory: Path) -> Path:

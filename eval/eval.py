@@ -9,7 +9,7 @@ import evaluate
 from tqdm.auto import tqdm
 
 from generate.constants import LOCATION_FILENAME, REGENERATE_FILENAME
-from generate.runs import resolve_dataset_and_run
+from storage.runs import resolve_dataset_and_run
 from storage import load_from_jsonl
 
 
@@ -19,7 +19,7 @@ REGENERATE_METRICS_FILENAME = "regenerate_metrics.json"
 
 def normalize_comment(text: str) -> str:
     """Comment text reduced to its content. Per-line '#' markers and indentation 
-    are stripped. Evrything is joined into a single line with single spaces."""
+    are stripped. Everything is joined into a single line with single spaces."""
     words = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -76,7 +76,7 @@ class CommentScorer:
                 ref_batch = references[start : start + batch_size]
 
                 # We use per comment pair BLEU 4 here (not corpus-level).
-                # Smoothing is neeeded, otherwise any pair without a matching
+                # Smoothing is needed, otherwise any pair without a matching
                 # 4-gram scores 0.
                 bleu_scores = [
                     self._bleu.compute(

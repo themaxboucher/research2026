@@ -3,9 +3,10 @@ import logging
 import textwrap
 import tokenize
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 from generate.validate import target_comments
+from generate.models import ModelProfile
 from generate.model_output import strip_code_output_wrappers
 from generate.prompt import build_regenerate_prompt
 from generate.parse_code import scope_bounds
@@ -215,7 +216,7 @@ def _regenerate_with_model(
     targets: list[dict],
     given_comment_texts: set[str],
     model_name: str,
-    get_completion,
+    get_completion: Callable[[str, str], str],
 ) -> dict:
     raw_response = get_completion(model_name, prompt)
     try:
@@ -256,7 +257,7 @@ def _run_llms_concurrently(
     anchor_positions: list[int | None],
     targets: list[dict],
     given_comment_texts: set[str],
-    model_profile,
+    model_profile: ModelProfile,
 ) -> list[dict]:
     with ThreadPoolExecutor(max_workers=len(model_profile.model_names)) as executor:
         futures = [
@@ -276,7 +277,7 @@ def _run_llms_concurrently(
 
 
 def _scope_regeneration(
-    file_data: dict, source_code: str, scope_group: dict, model_profile
+    file_data: dict, source_code: str, scope_group: dict, model_profile: ModelProfile
 ) -> dict:
     source_lines = source_code.splitlines()
     kept_lines = stripped_scope_lines(
@@ -362,7 +363,7 @@ def _group_targets_by_scope(source_code: str, target_comments: list[dict]) -> li
     return scope_groups
 
 
-def regenerate_generate_for_file(file_data: dict, model_profile) -> list[dict]:
+def regenerate_generate_for_file(file_data: dict, model_profile: ModelProfile) -> list[dict]:
     source_code = file_data["source_code"]
 
     scope_records = []

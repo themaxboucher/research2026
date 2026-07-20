@@ -4,7 +4,7 @@ from pathlib import Path
 
 from generate.models import get_model_profile
 from generate.constants import SOURCE_FILENAME
-from generate.runs import resolve_dataset_and_run, read_manifest, write_manifest
+from storage.runs import resolve_dataset_and_run, read_manifest, write_manifest
 from generate.approaches import approaches_from_argument, APPROACHES
 
 

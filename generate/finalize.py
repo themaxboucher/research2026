@@ -7,7 +7,7 @@ from generate.constants import (
     REGENERATE_FILENAME,
     PROGRESS_FILENAME,
 )
-from generate.runs import resolve_dataset_and_run
+from storage.runs import resolve_dataset_and_run
 from storage.jsonl import merge_jsonl_shards, iter_from_jsonl
 
 

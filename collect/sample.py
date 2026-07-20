@@ -4,7 +4,7 @@ import random
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from tqdm.auto import tqdm
-from collect.datasets import dataset_directory_from_argument, latest_dataset_directory
+from storage.datasets import dataset_directory_from_argument, latest_dataset_directory
 from storage import iter_from_jsonl, save_to_jsonl
 
 from collect.constants import DATA_FILENAME

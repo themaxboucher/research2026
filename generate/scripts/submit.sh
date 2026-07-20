@@ -1,12 +1,12 @@
 #!/bin/bash
 #
 # Usage:
-#   ./generate-submit.sh --num-tasks 8                Fresh generation across 8 GPUs
-#   ./generate-submit.sh --dataset-dir <timestamp>    Generate for a specific dataset (default: latest)
-#   ./generate-submit.sh --run-dir <timestamp>        Resume an existing generation (reuses its config)
-#   ./generate-submit.sh --array 3,7                  Submit only these task indices (resume)
-#   ./generate-submit.sh --approaches location        Approaches to run (default: location,regenerate)
-#   ./generate-submit.sh --max-generate 100           Cap files sent to the LLMs
+#   ./submit.sh --num-tasks 8                Fresh generation across 8 GPUs
+#   ./submit.sh --dataset-dir <timestamp>    Generate for a specific dataset (default: latest)
+#   ./submit.sh --run-dir <timestamp>        Resume an existing generation (reuses its config)
+#   ./submit.sh --array 3,7                  Submit only these task indices (resume)
+#   ./submit.sh --approaches location        Approaches to run (default: location,regenerate)
+#   ./submit.sh --max-generate 100           Cap files sent to the LLMs
 
 set -euo pipefail
 

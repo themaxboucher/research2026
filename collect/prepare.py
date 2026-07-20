@@ -6,7 +6,7 @@ from collect.constants import (
     DEFAULT_MAX_REPOS,
     DEFAULT_REPOS_PER_TASK,
 )
-from collect.datasets import (
+from storage.datasets import (
     create_new_dataset_directory,
     dataset_directory_from_argument,
 )
@@ -82,7 +82,6 @@ def main():
     # submit.sh uses these prints to parse the DATASET_DIR and NUM_TASKS
     print(f"DATASET_DIR={dataset_directory}")
     print(f"NUM_TASKS={num_tasks}")
-    return
 
 
 if __name__ == "__main__":

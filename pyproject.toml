@@ -1,7 +1,7 @@
 [project]
 name = "research2026"
 version = "0.1.0"
-description = "Add your description here"
+description = "Measuring how well LLMs reproduce human-written Python code comments."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
