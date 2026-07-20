@@ -9,7 +9,7 @@ import evaluate
 from tqdm.auto import tqdm
 
 from generate.generate import LOCATION_FILENAME, REGENERATE_FILENAME, list_generations
-from collect.dataset import latest_dataset_directory
+from collect.datasets import latest_dataset_directory
 from storage import load_from_jsonl
 
 
