@@ -2,7 +2,7 @@
 #SBATCH --job-name=mine-sample
 #SBATCH --time=04:00:00
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=8G
+#SBATCH --mem=32G
 #SBATCH --output=logs/mine-sample-%j.out
 #SBATCH --error=logs/mine-sample-%j.err
 
