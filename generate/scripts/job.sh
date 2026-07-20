@@ -19,10 +19,10 @@ source .venv/bin/activate
 
 export TQDM_DISABLE=1
 export MODEL_PROFILE=cluster
-# Models were pre-downloaded by generate-submit.sh; compute nodes stay offline
+# Models were pre-downloaded by submit.sh. Compute nodes can stay offline
 export HF_HUB_OFFLINE=1
 
 python -m generate.generate \
+  --dataset-dir "${DATASET_DIR}" \
   --run-dir "${RUN_DIR}" \
-  --generation "${GENERATION}" \
   --task-id "${SLURM_ARRAY_TASK_ID}"
