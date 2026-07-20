@@ -15,6 +15,8 @@ from storage import (
 )
 from generate.comments import get_comments_from_file
 from generate.models import ModelProfile, get_model_profile
+from generate.location_generate import location_generate_for_file
+from generate.regenerate_generate import regenerate_generate_for_file
 from generate.runs import (
     read_manifest,
     resolve_dataset_and_run,
@@ -105,11 +107,6 @@ def _generate_for_file(
     model_profile: ModelProfile,
     approaches: list[str],
 ) -> list[tuple[str, list[dict]]]:
-    # Imported here so each approach module can share this module's model
-    # profile and target-comment helpers without a circular import.
-    from generate.location_generate import location_generate_for_file
-    from generate.regenerate_generate import regenerate_generate_for_file
-
     outputs: list[tuple[str, list[dict]]] = []
     if "regenerate" in approaches:
         scope_records = regenerate_generate_for_file(file_data, model_profile)
@@ -147,7 +144,7 @@ def _run_generation(
 
     concurrent_files = model_profile.concurrent_files
 
-    # Resume an interrupted run for this label rather than overwriting it
+    # Resume an interrupted run rather than overwriting it
     truncate_broken_tail(run_dir, progress_filename)
     completed_keys = _completed_file_keys(run_dir, progress_filename)
     for filename in output_filenames:
