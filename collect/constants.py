@@ -4,7 +4,7 @@ DATASET_DIRECTORY_NAME = "datasets"
 DATASET_DIRECTORY = Path(__file__).parent.parent / DATASET_DIRECTORY_NAME
 DATA_FILENAME = "dataset"
 REPOS_CACHE_FILENAME = "repos_cache"
-MINNED_REPOS_FILENAME = "mined_repos"
+MINED_REPOS_FILENAME = "mined_repos"
 
 # === LLM knowledge cutoffs ===
 # GPT-5.6 Luna (https://developers.openai.com/api/docs/models/gpt-5.6-luna): Feb 16, 2026

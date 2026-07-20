@@ -22,7 +22,7 @@ from storage import (
 )
 from collect.constants import (
     DATA_FILENAME,
-    MINNED_REPOS_FILENAME,
+    MINED_REPOS_FILENAME,
     CUTOFF_DATE,
     DEFAULT_MAX_REPOS,
 )
@@ -33,7 +33,7 @@ def _get_shard_filenames(task_id: int, num_tasks: int) -> tuple[str, str]:
     formatted_suffix = f"{task_id:0{digit_width}d}"
     return (
         f"{DATA_FILENAME}.{formatted_suffix}",
-        f"{MINNED_REPOS_FILENAME}.{formatted_suffix}",
+        f"{MINED_REPOS_FILENAME}.{formatted_suffix}",
     )
 
 
@@ -194,7 +194,7 @@ def _collect(
     if in_jobs_array:
         data_filename, mined_filename = _get_shard_filenames(task_id, num_tasks)
     else:
-        data_filename, mined_filename = DATA_FILENAME, MINNED_REPOS_FILENAME
+        data_filename, mined_filename = DATA_FILENAME, MINED_REPOS_FILENAME
 
     all_repos = get_repos(repo_min_stars, max_repos, dataset_dir)
     mining_end = dataset_directory_timestamp(dataset_dir)
