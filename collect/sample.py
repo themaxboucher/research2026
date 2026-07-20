@@ -11,7 +11,7 @@ from storage import iter_from_jsonl, save_to_jsonl
 from storage.datasets import dataset_directory_from_argument, latest_dataset_directory
 
 SAMPLE_FILENAME = "dataset_sample"
-DEFAULT_NUM_COMMITS = 100
+DEFAULT_NUM_COMMITS = 100000
 DEFAULT_MAX_FILES_PER_COMMIT = 5
 
 
