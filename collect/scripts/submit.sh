@@ -44,6 +44,7 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
+# Set up the Python environment
 module load python/3.13
 
 if [[ ! -d .venv ]]; then
@@ -63,6 +64,7 @@ PREP_ARGS=(--repos-per-task "$REPOS_PER_TASK")
 echo "+ python -m collect.prepare ${PREP_ARGS[*]}"
 PREP_OUT="$(python -m collect.prepare "${PREP_ARGS[@]}")"
 
+# Read the printed variables
 DATASET_DIR="$(grep '^DATASET_DIR=' <<<"$PREP_OUT" | cut -d= -f2-)"
 NUM_TASKS="$(grep '^NUM_TASKS=' <<<"$PREP_OUT" | cut -d= -f2-)"
 
