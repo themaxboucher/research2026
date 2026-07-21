@@ -26,6 +26,11 @@ Each `submit.sh` runs a prepare step, submits the mining/generation job array,
 then a finalize job to merge the shards. Pass `--help` for options (`--dataset-dir`
 / `--run-dir` to resume, `--array` to rerun tasks, throttles, limits).
 
+Generation defaults to local inference on the cluster's GPUs (the `transformers`
+backend). Pass `--profile openrouter` to route inference through the OpenRouter
+API instead — no GPU is used, but the compute nodes need outbound internet and
+`OPENROUTER_API_KEY`.
+
 Once a run finishes, `./collect/scripts/pull-datasets.sh` rsyncs the dataset
 back to your machine (configure `CLUSTER_SSH_HOST` / `CLUSTER_REMOTE_DIR` in `.env`).
 

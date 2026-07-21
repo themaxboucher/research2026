@@ -1,7 +1,9 @@
 #!/bin/bash
 #
 # Usage:
-#   ./submit.sh --num-tasks 8                Fresh generation across 8 GPUs
+#   ./submit.sh --num-tasks 8                Fresh generation across 8 tasks
+#   ./submit.sh --profile openrouter         Inference backend: transformers (local
+#                                            GPU) or openrouter (API) (default: transformers)
 #   ./submit.sh --dataset-dir <timestamp>    Generate for a specific dataset (default: latest)
 #   ./submit.sh --run-dir <timestamp>        Resume an existing generation (reuses its config)
 #   ./submit.sh --array 3,7                  Submit only these task indices (resume)
@@ -14,6 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 NUM_TASKS=""
+PROFILE="transformers"
 DATASET_DIR=""
 RUN_DIR=""
 ARRAY_INDICES=""
@@ -21,13 +24,14 @@ APPROACHES=""
 MAX_GENERATE=""
 
 usage() {
-  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --num-tasks) NUM_TASKS="$2"; shift 2 ;;
+    --profile) PROFILE="$2"; shift 2 ;;
     --dataset-dir) DATASET_DIR="$2"; shift 2 ;;
     --run-dir) RUN_DIR="$2"; shift 2 ;;
     --array) ARRAY_INDICES="$2"; shift 2 ;;
@@ -37,6 +41,12 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown option: $1" >&2; usage 1 ;;
   esac
 done
+
+# Each profile pairs an inference backend with its own job script
+case "$PROFILE" in
+  transformers|openrouter) JOB_SCRIPT="generate/scripts/job-${PROFILE}.sh" ;;
+  *) echo "Unknown --profile: $PROFILE (expected transformers or openrouter)" >&2; usage 1 ;;
+esac
 
 # Set up the Python environment
 module load python/3.13
@@ -49,10 +59,13 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
-export MODEL_PROFILE=transformers
+export MODEL_PROFILE="$PROFILE"
 
-# Warm the shared HF cache from the login node
-python - <<'EOF'
+# Warm the shared HF cache from the login node so the offline compute nodes can
+# load the weights. Only the transformers backend runs models locally; the
+# openrouter backend calls an API and needs no local weights.
+if [[ "$PROFILE" == "transformers" ]]; then
+  python - <<'EOF'
 from huggingface_hub import snapshot_download
 
 from generate.models import MODEL_PROFILES
@@ -61,6 +74,7 @@ for model_name in MODEL_PROFILES["transformers"].model_names:
     print(f"Ensuring {model_name} is in the HF cache")
     snapshot_download(model_name)
 EOF
+fi
 
 # Phase 1: Prepare
 PREP_ARGS=()
@@ -94,8 +108,8 @@ ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}"
 ARRAY_JOB_ID=$(sbatch --parsable \
   --array="$ARRAY_SPEC" \
   --export=ALL,DATASET_DIR="$DATASET_DIR",RUN_DIR="$RUN_DIR" \
-  generate/scripts/job.sh)
-echo "Submitted array job $ARRAY_JOB_ID (--array=$ARRAY_SPEC)"
+  "$JOB_SCRIPT")
+echo "Submitted array job $ARRAY_JOB_ID (--array=$ARRAY_SPEC, --profile=$PROFILE)"
 
 # Phase 3: Merge the per-task shards once every task succeeds
 FINALIZE_JOB_ID=$(sbatch --parsable \
