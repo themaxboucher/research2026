@@ -8,6 +8,7 @@
 #   ./submit.sh --throttle 20               Max concurrent array tasks (default 20)
 #   ./submit.sh --max-repos 1000            Cap repos searched (passed to --prepare)
 #   ./submit.sh --repo-min-stars 50         Min stars filter (passed to --prepare)
+#   ./submit.sh --skip-setup                Reuse the existing .venv; skip pip install
 
 set -euo pipefail
 
@@ -20,9 +21,10 @@ DATASET_DIR=""
 ARRAY_INDICES=""
 MAX_REPOS=""
 REPO_MIN_STARS=""
+SKIP_SETUP=""
 
 usage() {
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -34,6 +36,7 @@ while [[ $# -gt 0 ]]; do
     --throttle) THROTTLE="$2"; shift 2 ;;
     --max-repos) MAX_REPOS="$2"; shift 2 ;;
     --repo-min-stars) REPO_MIN_STARS="$2"; shift 2 ;;
+    --skip-setup) SKIP_SETUP=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 1 ;;
   esac
@@ -44,16 +47,24 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-# Set up the Python environment
+# Set up the Python environment. --skip-setup reuses an existing .venv as-is
 module load python/3.13
 
-if [[ ! -d .venv ]]; then
-  echo "Creating virtual environment in .venv"
-  python -m venv .venv
+if [[ -n "$SKIP_SETUP" ]]; then
+  if [[ ! -d .venv ]]; then
+    echo "No .venv found; run without --skip-setup first to create it." >&2
+    exit 1
+  fi
+  source .venv/bin/activate
+else
+  if [[ ! -d .venv ]]; then
+    echo "Creating virtual environment in .venv"
+    python -m venv .venv
+  fi
+  source .venv/bin/activate
+  python -m pip install --upgrade pip
+  python -m pip install -r requirements.txt
 fi
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
 
 # Phase 1: Prepare
 PREP_ARGS=(--repos-per-task "$REPOS_PER_TASK")

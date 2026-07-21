@@ -5,6 +5,7 @@
 #   ./submit.sh --dataset-dir <timestamp>   Evaluate a specific dataset (default: latest)
 #   ./submit.sh --run-dir <timestamp>       Evaluate a specific run (default: latest in dataset)
 #   ./submit.sh --force                     Recompute scores that already exist
+#   ./submit.sh --skip-setup                Reuse the existing .venv; skip pip install
 
 set -euo pipefail
 
@@ -14,9 +15,10 @@ cd "$(dirname "$0")/../.."
 DATASET_DIR=""
 RUN_DIR=""
 FORCE=""
+SKIP_SETUP=""
 
 usage() {
-  sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -25,21 +27,30 @@ while [[ $# -gt 0 ]]; do
     --dataset-dir) DATASET_DIR="$2"; shift 2 ;;
     --run-dir) RUN_DIR="$2"; shift 2 ;;
     --force) FORCE=1; shift ;;
+    --skip-setup) SKIP_SETUP=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 1 ;;
   esac
 done
 
-# Set up the Python environment
+# Set up the Python environment. --skip-setup reuses an existing .venv as-is
 module load python/3.13
 
-if [[ ! -d .venv ]]; then
-  echo "Creating virtual environment in .venv"
-  python -m venv .venv
+if [[ -n "$SKIP_SETUP" ]]; then
+  if [[ ! -d .venv ]]; then
+    echo "No .venv found; run without --skip-setup first to create it." >&2
+    exit 1
+  fi
+  source .venv/bin/activate
+else
+  if [[ ! -d .venv ]]; then
+    echo "Creating virtual environment in .venv"
+    python -m venv .venv
+  fi
+  source .venv/bin/activate
+  python -m pip install --upgrade pip
+  python -m pip install -r requirements.txt
 fi
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
 
 # Warm the shared HF cache from the login node so the offline compute node can
 # score. BERTScore pulls roberta-large's weights; rouge, bleu, and bertscore

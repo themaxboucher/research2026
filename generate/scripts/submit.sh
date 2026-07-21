@@ -9,6 +9,7 @@
 #   ./submit.sh --array 3,7                  Submit only these task indices (resume)
 #   ./submit.sh --approaches location        Approaches to run (default: location,regenerate)
 #   ./submit.sh --max-generate 100           Cap files sent to the LLMs
+#   ./submit.sh --skip-setup                 Reuse the existing .venv; skip pip install
 
 set -euo pipefail
 
@@ -22,9 +23,10 @@ RUN_DIR=""
 ARRAY_INDICES=""
 APPROACHES=""
 MAX_GENERATE=""
+SKIP_SETUP=""
 
 usage() {
-  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -37,6 +39,7 @@ while [[ $# -gt 0 ]]; do
     --array) ARRAY_INDICES="$2"; shift 2 ;;
     --approaches) APPROACHES="$2"; shift 2 ;;
     --max-generate) MAX_GENERATE="$2"; shift 2 ;;
+    --skip-setup) SKIP_SETUP=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 1 ;;
   esac
@@ -48,16 +51,24 @@ case "$PROFILE" in
   *) echo "Unknown --profile: $PROFILE (expected transformers or openrouter)" >&2; usage 1 ;;
 esac
 
-# Set up the Python environment
+# Set up the Python environment. --skip-setup reuses an existing .venv as-is
 module load python/3.13
 
-if [[ ! -d .venv ]]; then
-  echo "Creating virtual environment in .venv"
-  python -m venv .venv
+if [[ -n "$SKIP_SETUP" ]]; then
+  if [[ ! -d .venv ]]; then
+    echo "No .venv found; run without --skip-setup first to create it." >&2
+    exit 1
+  fi
+  source .venv/bin/activate
+else
+  if [[ ! -d .venv ]]; then
+    echo "Creating virtual environment in .venv"
+    python -m venv .venv
+  fi
+  source .venv/bin/activate
+  python -m pip install --upgrade pip
+  python -m pip install -r requirements.txt
 fi
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
 
 export MODEL_PROFILE="$PROFILE"
 
