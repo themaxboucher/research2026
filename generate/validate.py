@@ -164,7 +164,7 @@ def _is_ai_authored_file(source_file: dict) -> bool:
 
 def is_eligible_file(source_file: dict) -> bool:
     """Check if a file record should be included in the generation."""
-    is_python_file = source_file.get("new_path", "").endswith(".py")
+    is_python_file = (source_file.get("new_path") or "").endswith(".py")
     if not is_python_file:
         return False
 
