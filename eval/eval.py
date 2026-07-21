@@ -2,10 +2,15 @@ import argparse
 import json
 import logging
 import os
+import statistics
 from collections import defaultdict
 from pathlib import Path
 
 import evaluate
+import matplotlib
+
+matplotlib.use("Agg")  # Headless: eval runs on machines with no display.
+import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 
 from generate.constants import LOCATION_FILENAME, REGENERATE_FILENAME
@@ -14,6 +19,10 @@ from storage.runs import resolve_dataset_and_run
 
 LOCATION_METRICS_FILENAME = "location_metrics.json"
 REGENERATE_METRICS_FILENAME = "regenerate_metrics.json"
+LOCATION_HISTOGRAM_FILENAME = "location_metrics_hist.png"
+REGENERATE_HISTOGRAM_FILENAME = "regenerate_metrics_hist.png"
+
+HISTOGRAM_METRICS = ("bleu4", "rougeL", "bertscore_f1")
 
 
 def normalize_comment(text: str) -> str:
@@ -131,6 +140,46 @@ def _write_records_atomically(records: list[dict], jsonl_path: Path) -> None:
     os.replace(temp_path, jsonl_path)
 
 
+def _write_histograms(
+    per_model_scores: dict, histogram_path: Path, title: str
+) -> None:
+    """One PNG with a subplot per metric in HISTOGRAM_METRICS, each overlaying
+    every model as a step-outline, density-normalized histogram over [0, 1].
+    Models with no scored pairs are skipped; if nothing has scores, no file is
+    written."""
+    models = sorted(model for model, scores in per_model_scores.items() if scores)
+    if not models:
+        logging.info("No scored pairs to plot for %s", histogram_path.name)
+        return
+
+    bins = 20
+    figure, axes = plt.subplots(
+        1, len(HISTOGRAM_METRICS), figsize=(6 * len(HISTOGRAM_METRICS), 4)
+    )
+    for axis, metric in zip(axes, HISTOGRAM_METRICS):
+        for model in models:
+            values = per_model_scores[model].get(metric) or []
+            if not values:
+                continue
+            axis.hist(
+                values,
+                bins=bins,
+                range=(0.0, 1.0),
+                density=True,
+                histtype="step",
+                label=model,
+            )
+        axis.set_title(metric)
+        axis.set_xlabel("score")
+        axis.set_ylabel("density")
+        axis.legend()
+
+    figure.suptitle(title)
+    figure.tight_layout()
+    figure.savefig(histogram_path)
+    plt.close(figure)
+
+
 def _write_metrics(records: list[dict], run_dir: Path, scorer: CommentScorer) -> None:
     """Per-model aggregates saved to location_metrics.json in the run directory.
 
@@ -149,7 +198,7 @@ def _write_metrics(records: list[dict], run_dir: Path, scorer: CommentScorer) ->
                 model = result.get("model") or "<unknown>"
                 prediction = normalize_comment(result.get("comment_text") or "")
                 per_model_pairs[model].append((prediction, reference))
-                for metric in ("rougeL", "bertscore_f1"):
+                for metric in HISTOGRAM_METRICS:
                     per_model_scores[model][metric].append(result["scores"][metric])
 
     metrics = {}
@@ -159,13 +208,21 @@ def _write_metrics(records: list[dict], run_dir: Path, scorer: CommentScorer) ->
         scores = per_model_scores[model]
         metrics[model] = {
             "bleu4_corpus": scorer.corpus_bleu(predictions, references),
+            "bleu4_median": statistics.median(scores["bleu4"]),
             "rougeL": sum(scores["rougeL"]) / len(scores["rougeL"]),
+            "rougeL_median": statistics.median(scores["rougeL"]),
             "bertscore_f1": sum(scores["bertscore_f1"]) / len(scores["bertscore_f1"]),
+            "bertscore_f1_median": statistics.median(scores["bertscore_f1"]),
         }
 
     metrics_path = run_dir / LOCATION_METRICS_FILENAME
     metrics_path.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    _write_histograms(
+        per_model_scores,
+        run_dir / LOCATION_HISTOGRAM_FILENAME,
+        f"Location generation — {run_dir.name}",
     )
 
 
@@ -233,7 +290,7 @@ def _write_regeneration_metrics(
             reference = normalize_comment(target.get("comment") or "")
             prediction = normalize_comment(extraction.get("comment_text") or "")
             per_model_pairs[model].append((prediction, reference))
-            for metric in ("rougeL", "bertscore_f1"):
+            for metric in HISTOGRAM_METRICS:
                 per_model_scores[model][metric].append(extraction["scores"][metric])
 
     metrics = {}
@@ -256,8 +313,13 @@ def _write_regeneration_metrics(
             references = [reference for _, reference in pairs]
             scores = per_model_scores[model]
             model_metrics["bleu4_corpus"] = scorer.corpus_bleu(predictions, references)
+            model_metrics["bleu4_median"] = statistics.median(scores["bleu4"])
             model_metrics["rougeL"] = sum(scores["rougeL"]) / len(scores["rougeL"])
+            model_metrics["rougeL_median"] = statistics.median(scores["rougeL"])
             model_metrics["bertscore_f1"] = sum(scores["bertscore_f1"]) / len(
+                scores["bertscore_f1"]
+            )
+            model_metrics["bertscore_f1_median"] = statistics.median(
                 scores["bertscore_f1"]
             )
         metrics[model] = model_metrics
@@ -265,6 +327,11 @@ def _write_regeneration_metrics(
     metrics_path = run_dir / REGENERATE_METRICS_FILENAME
     metrics_path.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    _write_histograms(
+        per_model_scores,
+        run_dir / REGENERATE_HISTOGRAM_FILENAME,
+        f"Regeneration — {run_dir.name}",
     )
 
 
