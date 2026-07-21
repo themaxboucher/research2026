@@ -18,7 +18,7 @@ module load python/3.13
 source .venv/bin/activate
 
 export TQDM_DISABLE=1
-export MODEL_PROFILE=cluster
+export MODEL_PROFILE=transformers
 # Models were pre-downloaded by submit.sh. Compute nodes can stay offline
 export HF_HUB_OFFLINE=1
 

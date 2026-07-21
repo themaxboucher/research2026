@@ -49,7 +49,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
-export MODEL_PROFILE=cluster
+export MODEL_PROFILE=transformers
 
 # Warm the shared HF cache from the login node
 python - <<'EOF'
@@ -57,7 +57,7 @@ from huggingface_hub import snapshot_download
 
 from generate.models import MODEL_PROFILES
 
-for model_name in MODEL_PROFILES["cluster"].model_names:
+for model_name in MODEL_PROFILES["transformers"].model_names:
     print(f"Ensuring {model_name} is in the HF cache")
     snapshot_download(model_name)
 EOF

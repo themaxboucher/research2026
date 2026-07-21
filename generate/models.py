@@ -13,7 +13,7 @@ class ModelProfile(NamedTuple):
 
 
 MODEL_PROFILES = {
-    "local": ModelProfile(
+    "openrouter": ModelProfile(
         model_names=[
             "meta-llama/llama-3.1-8b-instruct",
             "qwen/qwen-2.5-7b-instruct",
@@ -21,7 +21,7 @@ MODEL_PROFILES = {
         get_completion=openrouter.get_completion,
         concurrent_files=24,
     ),
-    "cluster": ModelProfile(
+    "transformers": ModelProfile(
         model_names=[
             "meta-llama/Llama-3.1-8B-Instruct",
             "Qwen/Qwen2.5-7B-Instruct",
@@ -32,7 +32,7 @@ MODEL_PROFILES = {
         concurrent_files=1,
     ),
 }
-DEFAULT_MODEL_PROFILE = "local"
+DEFAULT_MODEL_PROFILE = "openrouter"
 
 
 def get_model_profile() -> tuple[ModelProfile, str]:
