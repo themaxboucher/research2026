@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=generate-comments
-#SBATCH --time=24:00:00
+#SBATCH --time=04:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --gpus-per-node=h100:1
+#SBATCH --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --output=logs/generate-comments-%A_%a.out
 #SBATCH --error=logs/generate-comments-%A_%a.err
 
