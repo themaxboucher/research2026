@@ -1892,7 +1892,7 @@ requires-dist = [
     { name = "evaluate", specifier = ">=0.4.6" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "openrouter", specifier = ">=0.9.2" },
-    { name = "pandas", specifier = ">=3.0.3" },
+    { name = "pandas", specifier = ">=3.0.0" },
     { name = "pydriller", specifier = ">=2.9" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "requests", specifier = ">=2.34.2" },

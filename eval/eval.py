@@ -2,31 +2,34 @@ import argparse
 import json
 import logging
 import os
+import random
 import statistics
 from collections import defaultdict
 from pathlib import Path
 
-import evaluate
 import matplotlib
 
 matplotlib.use("Agg")  # Headless: eval runs on machines with no display.
 import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
 
+from eval.constants import (
+    BASELINE_MODELS,
+    BASELINE_SEED,
+    BASELINES,
+    HISTOGRAM_METRICS,
+    LOCATION_HISTOGRAM_FILENAME,
+    LOCATION_METRICS_FILENAME,
+    REGENERATE_HISTOGRAM_FILENAME,
+    REGENERATE_METRICS_FILENAME,
+)
+from eval.scorer import CommentScorer
 from generate.constants import LOCATION_FILENAME, REGENERATE_FILENAME
 from storage import load_from_jsonl
 from storage.runs import resolve_dataset_and_run
 
-LOCATION_METRICS_FILENAME = "location_metrics.json"
-REGENERATE_METRICS_FILENAME = "regenerate_metrics.json"
-LOCATION_HISTOGRAM_FILENAME = "location_metrics_hist.png"
-REGENERATE_HISTOGRAM_FILENAME = "regenerate_metrics_hist.png"
-
-HISTOGRAM_METRICS = ("bleu4", "rougeL", "bertscore_f1")
-
 
 def normalize_comment(text: str) -> str:
-    """Comment text reduced to its content. Per-line '#' markers and indentation 
+    """Comment text reduced to its content. Per-line '#' markers and indentation
     are stripped. Everything is joined into a single line with single spaces."""
     words = []
     for line in text.splitlines():
@@ -37,80 +40,15 @@ def normalize_comment(text: str) -> str:
     return " ".join(words)
 
 
-class CommentScorer:
-    """Computes the three metrics over batches of (prediction, reference) pairs."""
-
-    def __init__(self):
-        self._bleu = None
-        self._rouge = None
-        self._bertscore = None
-
-    def _load(self):
-        # Load the metric models if they haven't been loaded yet.
-        # We load them lazily so that runs with no results to score don't pay the cost of loading BERTScore.
-        if self._rouge is None or self._bertscore is None:
-            self._rouge = evaluate.load("rouge")
-            self._bertscore = evaluate.load("bertscore")
-
-    def _load_bleu(self):
-        # BLEU loads separately because corpus_bleu is needed at aggregate
-        # time even when there are no new pairs to score.
-        if self._bleu is None:
-            self._bleu = evaluate.load("bleu")
-
-    def corpus_bleu(self, predictions: list[str], references: list[str]) -> float:
-        """Standard (unsmoothed) corpus-level BLEU-4 over all pairs at once."""
-        self._load_bleu()
-        return self._bleu.compute(
-            predictions=predictions, references=references, max_order=4
-        )["bleu"]
-
-    def score_pairs(
-        self,
-        predictions: list[str],
-        references: list[str],
-        desc: str = "Scoring",
-    ) -> list[dict]:
-        self._load()
-        self._load_bleu()
-
-        # Score in chunks so a progress bar can advance as pairs are processed,
-        # rather than blocking on one opaque batch (BERTScore dominates the cost).
-        scores = []
-        batch_size = 64
-        with tqdm(total=len(predictions), desc=desc, unit="pair") as progress_bar:
-            for start in range(0, len(predictions), batch_size):
-                pred_batch = predictions[start : start + batch_size]
-                ref_batch = references[start : start + batch_size]
-
-                # We use per comment pair BLEU 4 here (not corpus-level).
-                # Smoothing is needed, otherwise any pair without a matching
-                # 4-gram scores 0.
-                bleu_scores = [
-                    self._bleu.compute(
-                        predictions=[pred], references=[ref], max_order=4, smooth=True
-                    )["bleu"]
-                    for pred, ref in zip(pred_batch, ref_batch)
-                ]
-                rouge_scores = self._rouge.compute(
-                    predictions=pred_batch,
-                    references=ref_batch,
-                    rouge_types=["rougeL"],
-                    use_aggregator=False,
-                )["rougeL"]
-                bertscore_f1 = self._bertscore.compute(
-                    predictions=pred_batch, references=ref_batch, lang="en"
-                )["f1"]
-
-                scores.extend(
-                    {"bleu4": bleu, "rougeL": rouge, "bertscore_f1": bert}
-                    for bleu, rouge, bert in zip(
-                        bleu_scores, rouge_scores, bertscore_f1
-                    )
-                )
-                progress_bar.update(len(pred_batch))
-
-        return scores
+def _score_baseline(
+    scorer: CommentScorer,
+    references: list[str],
+    sentences: tuple[str, ...],
+    desc: str,
+) -> list[dict]:
+    rng = random.Random(BASELINE_SEED)
+    random_sentences = [rng.choice(sentences) for _ in references]
+    return scorer.score_pairs(random_sentences, references, desc=desc)
 
 
 def _collect_unscored(records: list[dict], force: bool) -> list[tuple[dict, str, str]]:
@@ -140,53 +78,73 @@ def _write_records_atomically(records: list[dict], jsonl_path: Path) -> None:
     os.replace(temp_path, jsonl_path)
 
 
-def _write_histograms(
-    per_model_scores: dict, histogram_path: Path, title: str
-) -> None:
+def _add_baseline_rows(metrics: dict, per_model_scores: dict) -> None:
+    for _field, model_key, _pool in BASELINES:
+        scores = per_model_scores.get(model_key)
+        if not scores:
+            continue
+        metrics[model_key] = {
+            "bleu4_median": statistics.median(scores["bleu4"]),
+            "rougeL": sum(scores["rougeL"]) / len(scores["rougeL"]),
+            "rougeL_median": statistics.median(scores["rougeL"]),
+            "bertscore_f1": sum(scores["bertscore_f1"]) / len(scores["bertscore_f1"]),
+            "bertscore_f1_median": statistics.median(scores["bertscore_f1"]),
+        }
+
+
+def _accumulate_baseline(per_model_scores: dict, scored_record: dict) -> None:
+    for field, model_key, _pool in BASELINES:
+        baseline_scores = scored_record.get(field)
+        if baseline_scores is None:
+            continue
+        for metric in HISTOGRAM_METRICS:
+            per_model_scores[model_key][metric].append(baseline_scores[metric])
+
+
+def _write_histograms(per_model_scores: dict, histogram_path: Path, title: str) -> None:
     """One PNG with a subplot per metric in HISTOGRAM_METRICS, each overlaying
     every model as a step-outline, density-normalized histogram over [0, 1].
-    Models with no scored pairs are skipped; if nothing has scores, no file is
-    written."""
+    Models with no scored pairs are skipped."""
     models = sorted(model for model, scores in per_model_scores.items() if scores)
     if not models:
         logging.info("No scored pairs to plot for %s", histogram_path.name)
         return
 
-    bins = 20
+    BINS = 40
     figure, axes = plt.subplots(
-        1, len(HISTOGRAM_METRICS), figsize=(6 * len(HISTOGRAM_METRICS), 4)
+        1, len(HISTOGRAM_METRICS), figsize=(7.5 * len(HISTOGRAM_METRICS), 5)
     )
     for axis, metric in zip(axes, HISTOGRAM_METRICS):
         for model in models:
             values = per_model_scores[model].get(metric) or []
             if not values:
                 continue
+            is_baseline = model in BASELINE_MODELS
             axis.hist(
                 values,
-                bins=bins,
+                bins=BINS,
                 range=(0.0, 1.0),
                 density=True,
                 histtype="step",
                 label=model,
+                # Baselines fade back with a dotted outline
+                linestyle=":" if is_baseline else "-",
+                linewidth=1.2 if is_baseline else 1.5,
+                alpha=0.4 if is_baseline else 1.0,
             )
         axis.set_title(metric)
         axis.set_xlabel("score")
         axis.set_ylabel("density")
-        axis.legend()
+        # Legend outside the axes so it never covers the histograms
+        axis.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize="small")
 
     figure.suptitle(title)
     figure.tight_layout()
-    figure.savefig(histogram_path)
+    figure.savefig(histogram_path, bbox_inches="tight")
     plt.close(figure)
 
 
 def _write_metrics(records: list[dict], run_dir: Path, scorer: CommentScorer) -> None:
-    """Per-model aggregates saved to location_metrics.json in the run directory.
-
-    BLEU is corpus-level, so it is recomputed from the normalized texts of all
-    usable results rather than averaged from the per-pair sentence scores.
-    ROUGE-L and BERTScore average cleanly per pair, so their stored scores are
-    reused. Models with no usable results are omitted."""
     per_model_pairs = defaultdict(list)
     per_model_scores = defaultdict(lambda: defaultdict(list))
     for record in records:
@@ -200,6 +158,7 @@ def _write_metrics(records: list[dict], run_dir: Path, scorer: CommentScorer) ->
                 per_model_pairs[model].append((prediction, reference))
                 for metric in HISTOGRAM_METRICS:
                     per_model_scores[model][metric].append(result["scores"][metric])
+                _accumulate_baseline(per_model_scores, result)
 
     metrics = {}
     for model in sorted(per_model_pairs):
@@ -214,6 +173,8 @@ def _write_metrics(records: list[dict], run_dir: Path, scorer: CommentScorer) ->
             "bertscore_f1": sum(scores["bertscore_f1"]) / len(scores["bertscore_f1"]),
             "bertscore_f1_median": statistics.median(scores["bertscore_f1"]),
         }
+
+    _add_baseline_rows(metrics, per_model_scores)
 
     metrics_path = run_dir / LOCATION_METRICS_FILENAME
     metrics_path.write_text(
@@ -241,9 +202,6 @@ def _iter_valid_extractions(records: list[dict]):
 def _collect_unscored_regenerations(
     records: list[dict], force: bool
 ) -> list[tuple[dict, str, str]]:
-    """Placement hits that still need scoring, as (extraction, prediction,
-    reference) with prediction/reference already normalized. Misses and
-    unusable extractions get `scores: null` right away and are not returned."""
     pending = []
     for _, target, extraction in _iter_valid_extractions(records):
         if not force and "scores" in extraction:
@@ -260,13 +218,6 @@ def _collect_unscored_regenerations(
 def _write_regeneration_metrics(
     records: list[dict], run_dir: Path, scorer: CommentScorer
 ) -> None:
-    """Per-model aggregates saved to regenerate_metrics.json in the run
-    directory. Alongside the text metrics (computed over placement hits only),
-    each model gets: regen_failure_rate — scope regenerations rejected because
-    the code changed or the output didn't parse; placement_recall — targets
-    the model commented at, out of all targets in valid regenerations;
-    form_match_rate — hits whose comment form (inline/block) matched the
-    human's."""
     scope_counts = defaultdict(lambda: {"total": 0, "failed": 0})
     for record in records:
         for result in record.get("results") or []:
@@ -292,6 +243,7 @@ def _write_regeneration_metrics(
             per_model_pairs[model].append((prediction, reference))
             for metric in HISTOGRAM_METRICS:
                 per_model_scores[model][metric].append(extraction["scores"][metric])
+            _accumulate_baseline(per_model_scores, extraction)
 
     metrics = {}
     for model in sorted(scope_counts):
@@ -324,6 +276,8 @@ def _write_regeneration_metrics(
             )
         metrics[model] = model_metrics
 
+    _add_baseline_rows(metrics, per_model_scores)
+
     metrics_path = run_dir / REGENERATE_METRICS_FILENAME
     metrics_path.write_text(
         json.dumps(metrics, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -336,27 +290,42 @@ def _write_regeneration_metrics(
 
 
 def _evaluate_location_generation(
-    run_dir: Path, scorer: CommentScorer, force: bool
+    run_dir: Path, scorer: CommentScorer, force: bool, limit: int | None = None
 ) -> None:
-    records = load_from_jsonl(run_dir, LOCATION_FILENAME)
+    all_records = load_from_jsonl(run_dir, LOCATION_FILENAME)
+    records = (
+        all_records if limit is None else all_records[:limit]
+    )  # Limit the records to the first `limit` records
     pending = _collect_unscored(records, force)
 
     if pending:
         predictions = [prediction for _, prediction, _ in pending]
         references = [reference for _, _, reference in pending]
-        desc = f"Scoring {run_dir.name}"
+        desc = f"Scoring {run_dir.name} (location)"
         for (result, _, _), scores in zip(
             pending, scorer.score_pairs(predictions, references, desc=desc)
         ):
             result["scores"] = scores
 
-    _write_records_atomically(records, run_dir / f"{LOCATION_FILENAME}.jsonl")
+        for field, model_key, pool in BASELINES:
+            baseline = _score_baseline(
+                scorer, references, pool, f"{desc} ({model_key})"
+            )
+            for (result, _, _), scores in zip(pending, baseline):
+                result[field] = scores
+
+    _write_records_atomically(all_records, run_dir / f"{LOCATION_FILENAME}.jsonl")
     logging.info("Scored %d new results in %s", len(pending), run_dir)
     _write_metrics(records, run_dir, scorer)
 
 
-def _evaluate_regeneration(run_dir: Path, scorer: CommentScorer, force: bool) -> None:
-    records = load_from_jsonl(run_dir, REGENERATE_FILENAME)
+def _evaluate_regeneration(
+    run_dir: Path, scorer: CommentScorer, force: bool, limit: int | None = None
+) -> None:
+    all_records = load_from_jsonl(run_dir, REGENERATE_FILENAME)
+    records = (
+        all_records if limit is None else all_records[:limit]
+    )  # Limit the records to the first `limit` records
     pending = _collect_unscored_regenerations(records, force)
 
     if pending:
@@ -368,16 +337,25 @@ def _evaluate_regeneration(run_dir: Path, scorer: CommentScorer, force: bool) ->
         ):
             extraction["scores"] = scores
 
-    _write_records_atomically(records, run_dir / f"{REGENERATE_FILENAME}.jsonl")
+        for field, model_key, pool in BASELINES:
+            baseline = _score_baseline(
+                scorer, references, pool, f"{desc} ({model_key})"
+            )
+            for (extraction, _, _), scores in zip(pending, baseline):
+                extraction[field] = scores
+
+    _write_records_atomically(all_records, run_dir / f"{REGENERATE_FILENAME}.jsonl")
     logging.info("Scored %d new regeneration results in %s", len(pending), run_dir)
     _write_regeneration_metrics(records, run_dir, scorer)
 
 
-def evaluate_run(run_dir: Path, scorer: CommentScorer, force: bool) -> None:
+def evaluate_run(
+    run_dir: Path, scorer: CommentScorer, force: bool, limit: int | None = None
+) -> None:
     if (run_dir / f"{LOCATION_FILENAME}.jsonl").exists():
-        _evaluate_location_generation(run_dir, scorer, force)
+        _evaluate_location_generation(run_dir, scorer, force, limit)
     if (run_dir / f"{REGENERATE_FILENAME}.jsonl").exists():
-        _evaluate_regeneration(run_dir, scorer, force)
+        _evaluate_regeneration(run_dir, scorer, force, limit)
 
 
 def parse_args():
@@ -399,6 +377,12 @@ def parse_args():
         action="store_true",
         help="Recompute scores for results that already have them",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Evaluate only the first N files/records (default: all)",
+    )
     return parser.parse_args()
 
 
@@ -413,10 +397,10 @@ def main():
         for filename in (LOCATION_FILENAME, REGENERATE_FILENAME)
     )
     if not has_output:
-        raise SystemExit(f"No generation output found in {run_directory}")
+        raise SystemExit(f"No output found in {run_directory}")
 
     scorer = CommentScorer()
-    evaluate_run(run_directory, scorer, force=args.force)
+    evaluate_run(run_directory, scorer, force=args.force, limit=args.limit)
 
 
 if __name__ == "__main__":
