@@ -16,7 +16,7 @@ from generate.constants import (
     SOURCE_FILENAME,
 )
 from generate.models import ModelProfile, get_model_profile
-from generate.validate import is_eligible_file
+from generate.filter import has_target_comments, is_eligible_metadata
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
@@ -60,8 +60,9 @@ def _with_parsed_comments(files_data):
         file_data["comments"] = []
         source_code = file_data.get("source_code")
         previous_source_code = file_data.get("previous_source_code")
-        # Records missing either side (e.g. added or deleted files) are
-        # filtered out by _is_eligible_file before their comments are read.
+        # Added/deleted files are already dropped by is_eligible_metadata
+        # upstream; this guards the rare MODIFY record with a null source side,
+        # skipping the parse so it falls out on the has_target_comments check.
         if source_code is None or previous_source_code is None:
             yield file_data
             continue
@@ -142,10 +143,17 @@ def _run_generation(
         if not (run_dir / f"{filename}.jsonl").exists():
             save_to_jsonl([], run_dir, filename)
 
-    files_data = _with_parsed_comments(iter_from_jsonl(dataset_dir, SOURCE_FILENAME))
-
+    # Reject records we can rule out from metadata alone (wrong extension,
+    # change type, missing previous source, AI-authored) before parsing, so
+    # non-Python files aren't tokenized as Python only to be discarded.
+    metadata_eligible = (
+        record
+        for record in iter_from_jsonl(dataset_dir, SOURCE_FILENAME)
+        if is_eligible_metadata(record)
+    )
+    files_data = _with_parsed_comments(metadata_eligible)
     eligible_files = (
-        file_data for file_data in files_data if is_eligible_file(file_data)
+        file_data for file_data in files_data if has_target_comments(file_data)
     )
     if limit is not None:
         eligible_files = itertools.islice(eligible_files, limit)

@@ -162,8 +162,7 @@ def _is_ai_authored_file(source_file: dict) -> bool:
     return False
 
 
-def is_eligible_file(source_file: dict) -> bool:
-    """Check if a file record should be included in the generation."""
+def is_eligible_metadata(source_file: dict) -> bool:
     is_python_file = (source_file.get("new_path") or "").endswith(".py")
     if not is_python_file:
         return False
@@ -177,10 +176,6 @@ def is_eligible_file(source_file: dict) -> bool:
     if not has_previous_source_code:
         return False
 
-    has_target_comments = bool(target_comments(source_file))
-    if not has_target_comments:
-        return False
-
     has_commit_message = source_file.get("commit_message") is not None
     if not has_commit_message:
         return False
@@ -190,3 +185,11 @@ def is_eligible_file(source_file: dict) -> bool:
         return False
 
     return True
+
+
+def has_target_comments(source_file: dict) -> bool:
+    return bool(target_comments(source_file))
+
+
+def is_eligible_file(source_file: dict) -> bool:
+    return is_eligible_metadata(source_file) and has_target_comments(source_file)

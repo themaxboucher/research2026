@@ -9,7 +9,7 @@ from generate.model_output import strip_code_output_wrappers
 from generate.models import ModelProfile
 from generate.parse_code import scope_bounds
 from generate.prompt import build_regenerate_prompt
-from generate.validate import target_comments
+from generate.filter import target_comments
 
 
 class CodeAnalysis(NamedTuple):

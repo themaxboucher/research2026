@@ -16,7 +16,7 @@ from generate.parse_code import (
     scope_code as _scope_code,
 )
 from generate.prompt import build_location_prompt
-from generate.validate import target_comments
+from generate.filter import target_comments
 
 
 def _diff_region_bounds(
