@@ -15,8 +15,8 @@ from generate.constants import (
     REGENERATE_FILENAME,
     SOURCE_FILENAME,
 )
-from generate.models import ModelProfile, get_model_profile
 from generate.filter import has_target_comments, is_eligible_metadata
+from generate.models import ModelProfile, get_model_profile
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
