@@ -18,7 +18,7 @@ def _prepare(
 
     source_path = dataset_dir / f"{SOURCE_FILENAME}.jsonl"
     if not source_path.exists():
-        raise FileNotFoundError(f"No sample file at {source_path}.")
+        raise FileNotFoundError(f"No file at {source_path}.")
 
     model_profile, model_profile_name = get_model_profile()
 
