@@ -1,7 +1,6 @@
 import argparse
 import itertools
 import logging
-import tokenize
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 
@@ -70,7 +69,7 @@ def _with_parsed_comments(files_data):
             file_data["comments"] = get_comments_from_file(
                 source_code, previous_source_code
             )
-        except (tokenize.TokenError, SyntaxError) as e:
+        except Exception as e:
             logging.warning(
                 "Failed to parse comments for %s: %s", file_data.get("new_path"), e
             )
