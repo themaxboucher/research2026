@@ -3,7 +3,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
 
-from generate.comments import extract_comments
+from collect.comments import extract_comments
+from collect.filter_rules import target_comments
 from generate.model_output import strip_output_wrappers
 from generate.models import ModelProfile
 from generate.parse_code import (
@@ -16,7 +17,6 @@ from generate.parse_code import (
     scope_code as _scope_code,
 )
 from generate.prompt import build_location_prompt
-from generate.filter import target_comments
 
 
 def _diff_region_bounds(
@@ -275,9 +275,7 @@ def _comment_generation(
     intent = comment_data.get("intent")
 
     if comment_data["status"] == "modified":
-        previous_comments = extract_comments(
-            previous_source_code, include_docstrings=False
-        )
+        previous_comments = extract_comments(previous_source_code)
         unmodified_comment = _reverted_comment_text(comment_data, previous_comments)
         diff_hunk = _scope_diff(diff, source_code, comment_data)
         prompt = build_location_prompt(

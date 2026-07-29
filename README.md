@@ -16,15 +16,20 @@ for generate). The submit scripts create the `.venv` and install deps for you.
 ## Running on the cluster
 
 ```bash
-./collect/scripts/submit.sh      # 1. mine repos into a dataset
-python -m collect.sample         #    sample the commits to run on
-./generate/scripts/submit.sh     # 2. query the LLMs for comment predictions
-python -m eval.eval              # 3. score predictions (BLEU / ROUGE / BERTScore)
+./collect/scripts/submit.sh       # 1. mine repos into a dataset
+sbatch collect/scripts/filter.sh  #    filter it down to the files worth generating on
+./generate/scripts/submit.sh      # 2. query the LLMs for comment predictions
+python -m eval.eval               # 3. score predictions (BLEU / ROUGE / BERTScore)
 ```
 
 Each `submit.sh` runs a prepare step, submits the mining/generation job array,
 then a finalize job to merge the shards. Pass `--help` for options (`--dataset-dir`
 / `--run-dir` to resume, `--array` to rerun tasks, throttles, limits).
+
+The filter step is a separate job rather than part of `collect/scripts/submit.sh`,
+so it has to be submitted once the mining array's finalize job has merged the
+shards. It defaults to the latest dataset; pass
+`--export=ALL,DATASET_DIR=<timestamp>` to pick another one.
 
 Generation defaults to local inference on the cluster's GPUs (the `transformers`
 backend). Pass `--profile openrouter` to route inference through the OpenRouter
@@ -38,4 +43,5 @@ back to your machine (configure `CLUSTER_SSH_HOST` / `CLUSTER_REMOTE_DIR` in `.e
 
 Each stage is also a plain Python package you can invoke directly — see the
 `python -m ...prepare / ...collect / ...generate / ...finalize` steps inside the
-submit scripts, run in that order.
+submit scripts, run in that order. Filtering is `python -m collect.filter`, run
+after `collect.finalize` has merged the mining shards.

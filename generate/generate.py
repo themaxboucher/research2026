@@ -8,14 +8,12 @@ from generate.approaches import (
     location_generate_for_file,
     regenerate_generate_for_file,
 )
-from generate.comments import get_comments_from_file
 from generate.constants import (
     LOCATION_FILENAME,
     PROGRESS_FILENAME,
     REGENERATE_FILENAME,
     SOURCE_FILENAME,
 )
-from generate.filter import has_target_comments, is_eligible_metadata
 from generate.models import ModelProfile, get_model_profile
 from storage import (
     append_to_jsonl,
@@ -52,30 +50,6 @@ def _shard_suffix(task_id: int, num_tasks: int) -> str:
 
 def _sharded(filename: str, suffix: str | None) -> str:
     return f"{filename}.{suffix}" if suffix is not None else filename
-
-
-def _with_parsed_comments(files_data):
-    """Annotate each streamed file record with its parsed code comments."""
-    for file_data in files_data:
-        file_data["comments"] = []
-        source_code = file_data.get("source_code")
-        previous_source_code = file_data.get("previous_source_code")
-        # Added/deleted files are already dropped by is_eligible_metadata
-        # upstream; this guards the rare MODIFY record with a null source side,
-        # skipping the parse so it falls out on the has_target_comments check.
-        if source_code is None or previous_source_code is None:
-            yield file_data
-            continue
-        try:
-            file_data["comments"] = get_comments_from_file(
-                source_code, previous_source_code
-            )
-        except Exception as e:
-            logging.warning(
-                "Failed to parse comments for %s: %s", file_data.get("new_path"), e
-            )
-            file_data["error"] = str(e)
-        yield file_data
 
 
 def _generate_for_file(
@@ -143,31 +117,21 @@ def _run_generation(
         if not (run_dir / f"{filename}.jsonl").exists():
             save_to_jsonl([], run_dir, filename)
 
-    # Reject records we can rule out from metadata alone (wrong extension,
-    # change type, missing previous source, AI-authored) before parsing, so
-    # non-Python files aren't tokenized as Python only to be discarded.
-    metadata_eligible = (
-        record
-        for record in iter_from_jsonl(dataset_dir, SOURCE_FILENAME)
-        if is_eligible_metadata(record)
-    )
-    files_data = _with_parsed_comments(metadata_eligible)
-    eligible_files = (
-        file_data for file_data in files_data if has_target_comments(file_data)
-    )
+    files_data = iter_from_jsonl(dataset_dir, SOURCE_FILENAME)
+
     if limit is not None:
-        eligible_files = itertools.islice(eligible_files, limit)
+        files_data = itertools.islice(files_data, limit)
     # Every array task streams the same source and applies the same filter and
     # limit, so striding over the eligible files deterministically partitions
     # them across tasks (mirrors collection's repos[task_id::num_tasks]).
     if in_jobs_array:
-        eligible_files = itertools.islice(eligible_files, task_id, None, num_tasks)
+        files_data = itertools.islice(files_data, task_id, None, num_tasks)
     # Filter out files already completed by an earlier run of this generation. This
     # runs after `limit` so the target set matches a fresh run's first `limit`
     # eligible files. We just don't redo the ones already finished.
-    eligible_files = (
+    files_data = (
         file_data
-        for file_data in eligible_files
+        for file_data in files_data
         if _file_key(file_data) not in completed_keys
     )
 
@@ -181,7 +145,7 @@ def _run_generation(
         in_flight: dict[Future, dict] = {}
 
         def submit_next_file() -> bool:
-            file_data = next(eligible_files, None)
+            file_data = next(files_data, None)
             if file_data is None:
                 return False
             future = executor.submit(
@@ -253,9 +217,7 @@ def _generate_for_task(dataset_dir: Path, run_dir: Path, task_id: int) -> Path:
     config = manifest.get("config") or {}
     num_tasks = config.get("num_tasks")
     if num_tasks is None:
-        raise RuntimeError(
-            f"Run {run_dir.name} was not prepared for a job array"
-        )
+        raise RuntimeError(f"Run {run_dir.name} was not prepared for a job array")
     if not 0 <= task_id < num_tasks:
         raise ValueError(
             f"--task-id {task_id} is out of range for --num-tasks {num_tasks}"

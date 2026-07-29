@@ -1,4 +1,5 @@
-DATA_FILENAME = "dataset"
+RAW_DATASET_FILENAME = "dataset_raw"
+DATASET_FILENAME = "dataset"
 REPOS_CACHE_FILENAME = "repos_cache"
 MINED_REPOS_FILENAME = "mined_repos"
 

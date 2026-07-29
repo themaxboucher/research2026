@@ -31,7 +31,9 @@ _WORD_DIRECTIVES = (
 )
 
 _DIRECTIVE_RE = re.compile(
-    r"^(?:" + "|".join(re.escape(word) for word in _WORD_DIRECTIVES) + r")(?![A-Za-z0-9])"
+    r"^(?:"
+    + "|".join(re.escape(word) for word in _WORD_DIRECTIVES)
+    + r")(?![A-Za-z0-9])"
     r"|^(?:" + "|".join(re.escape(name) for name in _COLON_DIRECTIVES) + r"):",
     re.IGNORECASE,
 )
@@ -70,6 +72,7 @@ def _is_machine_directive_comment(comment_text: str) -> bool:
     """
     return any(_line_is_directive(line) for line in comment_text.splitlines())
 
+
 def _has_at_least_one_alpha_char(s: str) -> bool:
     """Check if a string contains at least one alphabetic character."""
     return any(char.isalpha() for char in s)
@@ -94,25 +97,6 @@ def _is_visual_separator_comment(comment: str) -> bool:
         if run_length >= 5:
             return True
     return False
-
-
-def target_comments(source_file: dict) -> list[dict]:
-    TARGET_COMMENT_TYPES = {"inline", "block"}
-    TARGET_COMMENT_STATUSES = {"added"}
-    # `None` means the comment's intent was never labeled; it gets the generic instruction
-    TARGET_INTENTS = {"what", "why", "how", None}
-    return [
-        comment
-        for comment in (source_file.get("comments") or [])
-        if comment.get("type") in TARGET_COMMENT_TYPES
-        and comment.get("status") in TARGET_COMMENT_STATUSES
-        and comment.get("comment") is not None
-        and comment.get("intent") in TARGET_INTENTS
-        and not _is_machine_directive_comment(comment["comment"])
-        and _has_at_least_one_alpha_char(comment.get("comment", ""))
-        and not _is_visual_separator_comment(comment.get("comment", ""))
-        and comment.get("comment", "").isascii()  # Exclude non-english comments
-    ]
 
 
 def _is_ai_authored_file(source_file: dict) -> bool:
@@ -162,7 +146,26 @@ def _is_ai_authored_file(source_file: dict) -> bool:
     return False
 
 
-def is_eligible_metadata(source_file: dict) -> bool:
+def target_comments(source_file: dict) -> list[dict]:
+    TARGET_COMMENT_TYPES = {"inline", "block"}
+    TARGET_COMMENT_STATUSES = {"added"}
+    # `None` means the comment's intent was never labeled; it gets the generic instruction
+    TARGET_INTENTS = {"what", "why", "how", None}
+    return [
+        comment
+        for comment in (source_file.get("comments") or [])
+        if comment.get("type") in TARGET_COMMENT_TYPES
+        and comment.get("status") in TARGET_COMMENT_STATUSES
+        and comment.get("comment") is not None
+        and comment.get("intent") in TARGET_INTENTS
+        and not _is_machine_directive_comment(comment["comment"])
+        and _has_at_least_one_alpha_char(comment.get("comment", ""))
+        and not _is_visual_separator_comment(comment.get("comment", ""))
+        and comment.get("comment", "").isascii()  # Exclude non-english comments
+    ]
+
+
+def has_eligible_metadata(source_file: dict) -> bool:
     is_python_file = (source_file.get("new_path") or "").endswith(".py")
     if not is_python_file:
         return False
@@ -185,11 +188,3 @@ def is_eligible_metadata(source_file: dict) -> bool:
         return False
 
     return True
-
-
-def has_target_comments(source_file: dict) -> bool:
-    return bool(target_comments(source_file))
-
-
-def is_eligible_file(source_file: dict) -> bool:
-    return is_eligible_metadata(source_file) and has_target_comments(source_file)

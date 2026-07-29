@@ -2,14 +2,14 @@ import argparse
 import logging
 from pathlib import Path
 
-from collect.constants import DATA_FILENAME, MINED_REPOS_FILENAME
+from collect.constants import MINED_REPOS_FILENAME, RAW_DATASET_FILENAME
 from storage import merge_jsonl_shards
 from storage.datasets import resolve_dataset_directory
 
 
 def _finalize(dataset_directory: Path) -> None:
     repo_file_shards = merge_jsonl_shards(
-        dataset_directory, DATA_FILENAME, delete_shards=True
+        dataset_directory, RAW_DATASET_FILENAME, delete_shards=True
     )
     mined_repo_shards = merge_jsonl_shards(
         dataset_directory, MINED_REPOS_FILENAME, delete_shards=True
@@ -17,7 +17,7 @@ def _finalize(dataset_directory: Path) -> None:
     logging.info(
         "Merged %d %s shards and %d %s shards",
         repo_file_shards,
-        DATA_FILENAME,
+        RAW_DATASET_FILENAME,
         mined_repo_shards,
         MINED_REPOS_FILENAME,
     )

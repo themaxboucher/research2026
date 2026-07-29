@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from storage.timestamped_dirs import (
 )
 
 DATASET_DIRECTORY_NAME = "datasets"
+MANIFEST_FILENAME = "manifest"
 # Repo-root datasets/ directory (storage/ sits directly under the repo root).
 DATASET_DIRECTORY = Path(__file__).parent.parent / DATASET_DIRECTORY_NAME
 
@@ -70,3 +72,11 @@ def resolve_dataset_directory(
         dataset_directory = _latest_or_new_dataset_directory()
     logging.info("Using dataset directory: %s", dataset_directory)
     return dataset_directory
+
+
+def write_manifest(dataset_dir: Path, manifest: dict) -> dict:
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    (dataset_dir / (MANIFEST_FILENAME + ".json")).write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
+    return manifest

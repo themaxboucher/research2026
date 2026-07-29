@@ -12,7 +12,7 @@ from storage.timestamped_dirs import (
 )
 
 RUNS_DIRECTORY_NAME = "runs"
-MANIFEST_FILENAME = "run.json"
+MANIFEST_FILENAME = "run"
 
 
 def runs_root(dataset_directory: Path) -> Path:
@@ -73,14 +73,14 @@ def write_manifest(
         "config": config,
     }
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / MANIFEST_FILENAME).write_text(
+    (run_dir / (MANIFEST_FILENAME + ".json")).write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
     return manifest
 
 
 def read_manifest(run_dir: Path) -> dict:
-    manifest_path = run_dir / MANIFEST_FILENAME
+    manifest_path = run_dir / (MANIFEST_FILENAME + ".json")
     if manifest_path.exists():
         return json.loads(manifest_path.read_text(encoding="utf-8"))
     return {}

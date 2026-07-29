@@ -11,9 +11,9 @@ from tqdm.auto import tqdm
 
 from collect.constants import (
     CUTOFF_DATE,
-    DATA_FILENAME,
     DEFAULT_MAX_REPOS,
     MINED_REPOS_FILENAME,
+    RAW_DATASET_FILENAME,
 )
 from collect.repos import get_repos
 from storage import (
@@ -32,7 +32,7 @@ def _get_shard_filenames(task_id: int, num_tasks: int) -> tuple[str, str]:
     digit_width = max(len(str(num_tasks - 1)), 1)
     formatted_suffix = f"{task_id:0{digit_width}d}"
     return (
-        f"{DATA_FILENAME}.{formatted_suffix}",
+        f"{RAW_DATASET_FILENAME}.{formatted_suffix}",
         f"{MINED_REPOS_FILENAME}.{formatted_suffix}",
     )
 
@@ -194,7 +194,7 @@ def _collect(
     if in_jobs_array:
         data_filename, mined_filename = _get_shard_filenames(task_id, num_tasks)
     else:
-        data_filename, mined_filename = DATA_FILENAME, MINED_REPOS_FILENAME
+        data_filename, mined_filename = RAW_DATASET_FILENAME, MINED_REPOS_FILENAME
 
     all_repos = get_repos(repo_min_stars, max_repos, dataset_dir)
     mining_end = dataset_directory_timestamp(dataset_dir)
