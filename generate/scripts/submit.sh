@@ -79,7 +79,7 @@ if [[ "$PROFILE" == "transformers" ]]; then
   python - <<'EOF'
 from huggingface_hub import snapshot_download
 
-from generate.models import MODEL_PROFILES
+from generate.providers.models import MODEL_PROFILES
 
 for model_name in MODEL_PROFILES["transformers"].model_names:
     print(f"Ensuring {model_name} is in the HF cache")

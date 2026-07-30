@@ -7,9 +7,9 @@ from typing import Callable, NamedTuple
 
 from collect.filter_rules import target_comments
 from generate.model_output import strip_code_output_wrappers
-from generate.models import ModelProfile
 from generate.parse_code import scope_bounds
 from generate.prompt import build_regenerate_prompt
+from generate.providers.models import ModelProfile
 
 
 class CodeAnalysis(NamedTuple):
@@ -218,8 +218,9 @@ def _regenerate_with_model(
     model_name: str,
     get_completion: Callable[[str, str], str],
 ) -> dict:
-    raw_response = get_completion(model_name, prompt)
+    raw_response = None
     try:
+        raw_response = get_completion(model_name, prompt)
         regenerated_code = strip_code_output_wrappers(raw_response)
         if not regenerated_code:
             raise ValueError("Model returned an empty response")

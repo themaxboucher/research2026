@@ -6,30 +6,19 @@ from typing import Callable
 from collect.comments import extract_comments
 from collect.filter_rules import target_comments
 from generate.model_output import strip_output_wrappers
-from generate.models import ModelProfile
-from generate.parse_code import (
-    enclosing_scope_name as _enclosing_scope_name,
-)
-from generate.parse_code import (
-    local_scope_bounds as _local_scope_bounds,
-)
-from generate.parse_code import (
-    scope_code as _scope_code,
-)
+from generate.parse_code import enclosing_scope_name, local_scope_bounds, scope_code
 from generate.prompt import build_location_prompt
+from generate.providers.models import ModelProfile
 
 
 def _diff_region_bounds(
     source_code: str, source_lines: list[str], anchor_line: int
 ) -> tuple[int, int]:
-    """Line bounds (1-indexed, inclusive) of the local scope enclosing
-    `anchor_line`. When the change isn't inside a function or class, fall back
-    to a window of up to MAX_LINE_COUNT lines centered on the anchor."""
     MAX_LINE_COUNT = 500
 
-    qualified_name = _enclosing_scope_name(source_code, anchor_line)
+    qualified_name = enclosing_scope_name(source_code, anchor_line)
     if qualified_name is not None:
-        scope_bounds = _local_scope_bounds(source_lines, source_code, qualified_name)
+        scope_bounds = local_scope_bounds(source_lines, source_code, qualified_name)
         if scope_bounds is not None:
             return scope_bounds
 
@@ -71,9 +60,6 @@ def _iter_hunks(diff: str):
 
 
 def _target_line_code(body_line: str, comment_data: dict) -> str | None:
-    """The comment-free code that should remain on a target `+` line. A block
-    comment line is wholly comment, so nothing remains (None). An inline comment
-    sits on a code line that may itself have changed, so keep the code."""
     if comment_data["type"] != "inline":
         return None
     anchor = comment_data.get("anchor")
@@ -83,12 +69,6 @@ def _target_line_code(body_line: str, comment_data: dict) -> str | None:
 
 
 def _stripped_hunk_body(hunk: dict, comment_data: dict) -> list[str]:
-    """Return the hunk body with the human's target comment removed. A block
-    target `+` line is dropped and its paired `-` reverts to context. An inline
-    target keeps its code change (comment stripped), collapsing to context only
-    when the code itself is unchanged. Surrounding changes keep their semantics —
-    each `+` consumes its positionally paired `-` (FIFO), so a non-target `+`
-    can't steal a dash that belongs to a later target `+`."""
     target_start_line = comment_data["start_line"]
     target_end_line = comment_data["end_line"]
     output_body: list[str] = []
@@ -147,11 +127,6 @@ def _stripped_hunk_body(hunk: dict, comment_data: dict) -> list[str]:
 
 
 def _scope_diff(diff: str, source_code: str, comment_data: dict) -> str | None:
-    """Build one unified-diff hunk whose context spans the entire local scope
-    enclosing the changed comment. Every change hunk within that scope is merged
-    in, the gaps between them padded with the scope's unchanged lines, and the
-    human's target comment stripped out. Returns None when no hunk overlaps the
-    scope (the target comment can't be located in the change)."""
     source_lines = source_code.splitlines()
 
     region_start, region_end = _diff_region_bounds(
@@ -217,8 +192,9 @@ def _generate_with_llm(
     model_name: str,
     get_completion: Callable[[str, str], str],
 ) -> dict:
-    raw_response = get_completion(model_name, prompt)
+    raw_response = None
     try:
+        raw_response = get_completion(model_name, prompt)
         comment_text = strip_output_wrappers(raw_response)
         if not comment_text:
             raise ValueError("Model returned an empty comment")
@@ -290,7 +266,7 @@ def _comment_generation(
         )
 
     if comment_data["status"] == "added":
-        scope_code = _scope_code(source_code, comment_data)
+        code = scope_code(source_code, comment_data)
         prompt = build_location_prompt(
             file_data["repo_name"],
             filepath,
@@ -298,7 +274,7 @@ def _comment_generation(
             commit_message=file_data["commit_message"],
             status="added",
             intent=intent,
-            scope_code=scope_code,
+            scope_code=code,
         )
 
     results = _run_llms_concurrently(prompt, filepath, model_profile)

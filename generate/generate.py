@@ -14,7 +14,7 @@ from generate.constants import (
     REGENERATE_FILENAME,
     SOURCE_FILENAME,
 )
-from generate.models import ModelProfile, get_model_profile
+from generate.providers.models import ModelProfile, get_model_profile
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
@@ -29,18 +29,16 @@ from storage.runs import (
 )
 
 
-def _file_key(record: dict) -> str:
-    # `\x00` is a safe separator because it's not valid in a GitHub repo name, path, or commit hash.
-    return "\x00".join(
-        str(record.get(field)) for field in ("repo_name", "new_path", "commit_hash")
-    )
+def _file_key(record: dict) -> tuple[str | None, str | None, str | None]:
+    return (record.get("repo_name"), record.get("new_path"), record.get("commit_hash"))
 
 
-def _completed_file_keys(gen_dir: Path, progress_filename: str) -> set[str]:
-    """File keys already committed to the progress log for this generation."""
-    if not (gen_dir / f"{progress_filename}.jsonl").exists():
+def _completed_file_keys(
+    run_dir: Path, progress_filename: str
+) -> set[tuple[str | None, str | None, str | None]]:
+    if not (run_dir / f"{progress_filename}.jsonl").exists():
         return set()
-    return {_file_key(record) for record in iter_from_jsonl(gen_dir, progress_filename)}
+    return {_file_key(record) for record in iter_from_jsonl(run_dir, progress_filename)}
 
 
 def _shard_suffix(task_id: int, num_tasks: int) -> str:
@@ -48,8 +46,19 @@ def _shard_suffix(task_id: int, num_tasks: int) -> str:
     return f"{task_id:0{digit_width}d}"
 
 
-def _sharded(filename: str, suffix: str | None) -> str:
+def _shard_filename(filename: str, suffix: str | None) -> str:
     return f"{filename}.{suffix}" if suffix is not None else filename
+
+
+def _output_filenames(approaches: list[str], suffix: str | None) -> list[str]:
+    return [
+        _shard_filename(filename, suffix)
+        for filename, approach in (
+            (LOCATION_FILENAME, "location"),
+            (REGENERATE_FILENAME, "regenerate"),
+        )
+        if approach in approaches
+    ]
 
 
 def _generate_for_file(
@@ -67,29 +76,14 @@ def _generate_for_file(
     return outputs
 
 
-def _output_filenames(approaches: list[str], suffix: str | None) -> list[str]:
-    return [
-        _sharded(filename, suffix)
-        for filename, approach in (
-            (LOCATION_FILENAME, "location"),
-            (REGENERATE_FILENAME, "regenerate"),
-        )
-        if approach in approaches
-    ]
+def _generate(dataset_dir: Path, run_dir: Path, task_id: int, config: dict) -> None:
+    num_tasks = config["num_tasks"]
+    approaches = config["approaches"]
+    limit = config["max_generate"]
+    model_profile, _ = get_model_profile()
 
-
-def _run_generation(
-    dataset_dir: Path,
-    run_dir: Path,
-    model_profile: ModelProfile,
-    approaches: list[str],
-    limit: int | None,
-    task_id: int | None = None,
-    num_tasks: int | None = None,
-) -> Path:
-    in_jobs_array = task_id is not None and num_tasks is not None
-    suffix = _shard_suffix(task_id, num_tasks) if in_jobs_array else None
-    progress_filename = _sharded(PROGRESS_FILENAME, suffix)
+    suffix = _shard_suffix(task_id, num_tasks)
+    progress_filename = _shard_filename(PROGRESS_FILENAME, suffix)
     output_filenames = _output_filenames(approaches, suffix)
 
     concurrent_files = model_profile.concurrent_files
@@ -121,11 +115,10 @@ def _run_generation(
 
     if limit is not None:
         files_data = itertools.islice(files_data, limit)
-    # Every array task streams the same source and applies the same filter and
-    # limit, so striding over the eligible files deterministically partitions
-    # them across tasks (mirrors collection's repos[task_id::num_tasks]).
-    if in_jobs_array:
-        files_data = itertools.islice(files_data, task_id, None, num_tasks)
+
+    # Striding over the eligible files deterministically partitions files across tasks.
+    files_data = itertools.islice(files_data, task_id, None, num_tasks)
+
     # Filter out files already completed by an earlier run of this generation. This
     # runs after `limit` so the target set matches a fresh run's first `limit`
     # eligible files. We just don't redo the ones already finished.
@@ -183,7 +176,7 @@ def _run_generation(
                 else:
                     for output_filename, records in outputs:
                         append_to_jsonl(
-                            records, run_dir, _sharded(output_filename, suffix)
+                            records, run_dir, _shard_filename(output_filename, suffix)
                         )
                     # Log only after every approach's output is on disk, so a
                     # crash mid-write leaves this file uncommitted and it is redone.
@@ -191,10 +184,9 @@ def _run_generation(
                         [{**file_key, "error": None}], run_dir, progress_filename
                     )
                     logging.info(
-                        "Generated comments for %s (file %d/%s)",
+                        "Generated comments for %s (file %d)",
                         file_key["new_path"],
                         files_processed + 1,
-                        limit if limit is not None and not in_jobs_array else "?",
                     )
                 files_processed += 1
                 submit_next_file()
@@ -205,25 +197,32 @@ def _run_generation(
         dataset_dir.name,
         files_processed,
     )
-    return run_dir
 
 
-def _generate_for_task(dataset_dir: Path, run_dir: Path, task_id: int) -> Path:
-    """Generate one array task's stride of the eligible files, into shard files."""
+def _valid_manifest_config(run_dir: Path, task_id: int) -> dict:
     manifest = read_manifest(run_dir)
     if not manifest:
         raise RuntimeError(f"No manifest at {run_dir / MANIFEST_FILENAME}.")
 
     config = manifest.get("config") or {}
+
     num_tasks = config.get("num_tasks")
     if num_tasks is None:
         raise RuntimeError(f"Run {run_dir.name} was not prepared for a job array")
-    if not 0 <= task_id < num_tasks:
+
+    approaches = config.get("approaches")
+    if approaches is None:
+        raise RuntimeError(
+            f"Run {run_dir.name} has no generation approaches configured"
+        )
+
+    invalid_task_id = not 0 <= task_id < num_tasks
+    if invalid_task_id:
         raise ValueError(
             f"--task-id {task_id} is out of range for --num-tasks {num_tasks}"
         )
 
-    model_profile, model_profile_name = get_model_profile()
+    _, model_profile_name = get_model_profile()
     manifest_profile = manifest.get("model_profile")
     if manifest_profile is not None and manifest_profile != model_profile_name:
         raise RuntimeError(
@@ -232,15 +231,7 @@ def _generate_for_task(dataset_dir: Path, run_dir: Path, task_id: int) -> Path:
             f"{model_profile_name!r}"
         )
 
-    return _run_generation(
-        dataset_dir,
-        run_dir,
-        model_profile,
-        approaches=config.get("approaches"),
-        limit=config.get("max_generate"),
-        task_id=task_id,
-        num_tasks=num_tasks,
-    )
+    return config
 
 
 def _parse_args():
@@ -264,23 +255,31 @@ def _parse_args():
         help="This task's index in the job array. Generates only this task's "
         "share of the eligible files into its own sharded files",
     )
-    return parser.parse_args()
 
-
-def main():
-    logging.basicConfig(level=logging.INFO)
-    args = _parse_args()
-
-    dataset_directory, run_directory = resolve_dataset_and_run(
-        args.dataset_dir, args.run_dir
-    )
+    args = parser.parse_args()
 
     if args.task_id is None:
         raise SystemExit(
             "--task-id is required: it is this task's index in the job array"
         )
 
-    _generate_for_task(dataset_directory, run_directory, task_id=args.task_id)
+    return args
+
+
+def main():
+    logging.basicConfig(level=logging.INFO)
+    args = _parse_args()
+
+    dataset_dir, run_dir = resolve_dataset_and_run(args.dataset_dir, args.run_dir)
+
+    manifest_config = _valid_manifest_config(run_dir, args.task_id)
+
+    return _generate(
+        dataset_dir,
+        run_dir,
+        task_id=args.task_id,
+        config=manifest_config,
+    )
 
 
 if __name__ == "__main__":

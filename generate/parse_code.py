@@ -63,27 +63,35 @@ def local_scope_bounds(
     return None
 
 
+def _window_around(anchor_line: int, line_count: int) -> tuple[int, int]:
+    window_length = min(MAX_SCOPE_LINE_COUNT, line_count)
+    start = anchor_line - window_length // 2
+    start = max(1, min(start, line_count - window_length + 1))
+    return start, start + window_length - 1
+
+
 def scope_bounds(source_code: str, source_lines: list[str], anchor_line: int) -> tuple[int, int]:
     """Line bounds (1-indexed, inclusive) of the local scope enclosing the
-    comment. Falls back to the whole module (capped) at module level."""
+    comment. Falls back to a capped window around the comment at module level."""
     qualified_name = enclosing_scope_name(source_code, anchor_line)
-    scope_bounds = (
+    local_bounds = (
         local_scope_bounds(source_lines, source_code, qualified_name)
         if qualified_name is not None
         else None
     )
-    if scope_bounds is not None:
-        return scope_bounds
-    return 1, min(len(source_lines), MAX_SCOPE_LINE_COUNT)
+    if local_bounds is not None:
+        return local_bounds
+    return _window_around(anchor_line, len(source_lines))
 
 
 def scope_code(source_code: str, comment_data: dict) -> str:
     """Return the source of the local scope enclosing the target comment, with
-    the target comment itself replaced by a placeholder. A block target
-    collapses to a single placeholder comment line; an inline target keeps its
-    code and gets a placeholder trailing comment. When the comment lives at
-    module level, fall back to the whole module (capped)."""
-    
+    the target comment itself replaced by a placeholder.
+
+    Raises when the placeholder cannot be placed: the prompt tells the model to
+    replace it, so scope code without one would silently produce a prediction
+    for no particular location."""
+
     PLACEHOLDER_COMMENT = "Add the comment here"
 
     source_lines = source_code.splitlines()
@@ -93,6 +101,7 @@ def scope_code(source_code: str, comment_data: dict) -> str:
     target_end = comment_data["end_line"]
 
     output_lines: list[str] = []
+    placeholder_placed = False
     for line_no in range(start, end + 1):
         line = source_lines[line_no - 1]
         line_is_target = target_start <= line_no <= target_end
@@ -106,10 +115,18 @@ def scope_code(source_code: str, comment_data: dict) -> str:
             code = anchor if anchor is not None else line.split("#", 1)[0].rstrip()
             if code:
                 output_lines.append(f"{code}  # {PLACEHOLDER_COMMENT}")
+                placeholder_placed = True
         elif line_no == target_start:
             # Collapse the block target to one placeholder line, keeping the
             # original indentation.
             indent = line[: len(line) - len(line.lstrip())]
             output_lines.append(f"{indent}# {PLACEHOLDER_COMMENT}")
+            placeholder_placed = True
+
+    if not placeholder_placed:
+        raise ValueError(
+            f"could not place the comment placeholder for the {comment_data['type']} "
+            f"comment at line {target_start}: scope spans lines {start}-{end}"
+        )
 
     return "\n".join(output_lines)

@@ -7,8 +7,6 @@ from generate.providers import openrouter, transformers
 class ModelProfile(NamedTuple):
     model_names: list[str]
     get_completion: Callable[[str, str], str]
-    # Files generated in parallel. Each file also fans out one request per
-    # model, so total in-flight requests ≈ concurrent_files × len(model_names).
     concurrent_files: int
 
 
@@ -27,12 +25,11 @@ MODEL_PROFILES = {
             "Qwen/Qwen2.5-7B-Instruct",
         ],
         get_completion=transformers.get_completion,
-        # The GPU serializes forward passes; concurrent files would only
-        # interleave and slow each other down.
+        # The GPU serializes forward passes. Concurrent files would only slow each other down.
         concurrent_files=1,
     ),
 }
-DEFAULT_MODEL_PROFILE = "openrouter"
+DEFAULT_MODEL_PROFILE = "openrouter" # OpenRouter can be used for inference off the HPC cluster
 
 
 def get_model_profile() -> tuple[ModelProfile, str]:
