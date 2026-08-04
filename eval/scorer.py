@@ -5,6 +5,7 @@ from tqdm.auto import tqdm
 
 from eval.constants import (
     BERTSCORE_BATCH_SIZE,
+    BERTSCORE_CHUNK_SIZE,
     BERTSCORE_MAX_LENGTH,
     BERTSCORE_MODEL,
 )
@@ -51,12 +52,12 @@ class CommentScorer:
         self._load()
         self._load_bleu()
 
-        # Score in batches so BERTScore can run forward passes in parallel
+        # Score in chunks so BERTScore can run forward passes in parallel
         scores = []
         with tqdm(total=len(predictions), desc=desc, unit="pair") as progress_bar:
-            for start in range(0, len(predictions), BERTSCORE_BATCH_SIZE):
-                pred_batch = predictions[start : start + BERTSCORE_BATCH_SIZE]
-                ref_batch = references[start : start + BERTSCORE_BATCH_SIZE]
+            for start in range(0, len(predictions), BERTSCORE_CHUNK_SIZE):
+                pred_chunk = predictions[start : start + BERTSCORE_CHUNK_SIZE]
+                ref_chunk = references[start : start + BERTSCORE_CHUNK_SIZE]
 
                 # We use per comment pair BLEU 4 here (not corpus-level).
                 # Smoothing is needed, otherwise any pair without a matching
@@ -65,19 +66,19 @@ class CommentScorer:
                     self._bleu.compute(
                         predictions=[pred], references=[ref], max_order=4, smooth=True
                     )["bleu"]
-                    for pred, ref in zip(pred_batch, ref_batch)
+                    for pred, ref in zip(pred_chunk, ref_chunk)
                 ]
                 rouge_scores = self._rouge.compute(
-                    predictions=pred_batch,
-                    references=ref_batch,
+                    predictions=pred_chunk,
+                    references=ref_chunk,
                     rouge_types=["rougeL"],
                     use_aggregator=False,
                 )["rougeL"]
                 # BERTScorer.score returns (P, R, F) tensors. We keep F1.
-                # Pass batch_size so its internal batching matches the chunk we
-                # feed it rather than defaulting back to 64.
+                # It re-batches the chunk internally for the GPU, so batch_size
+                # bounds peak memory independently of how large a chunk we feed.
                 bertscore_f1 = self._bertscore.score(
-                    pred_batch, ref_batch, batch_size=BERTSCORE_BATCH_SIZE
+                    pred_chunk, ref_chunk, batch_size=BERTSCORE_BATCH_SIZE
                 )[2].tolist()
 
                 scores.extend(
@@ -86,6 +87,6 @@ class CommentScorer:
                         bleu_scores, rouge_scores, bertscore_f1
                     )
                 )
-                progress_bar.update(len(pred_batch))
+                progress_bar.update(len(pred_chunk))
 
         return scores

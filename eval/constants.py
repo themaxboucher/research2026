@@ -7,7 +7,8 @@ BERTSCORE_MODEL = "microsoft/deberta-xlarge-mnli"
 
 BERTSCORE_MAX_LENGTH = 512
 
-BERTSCORE_BATCH_SIZE = 256
+BERTSCORE_CHUNK_SIZE = 256
+BERTSCORE_BATCH_SIZE = 16
 
 BASELINE_MODEL = "<baseline-software>"
 BASELINE_GENERAL_MODEL = "<baseline-general>"
