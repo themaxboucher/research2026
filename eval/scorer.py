@@ -1,16 +1,16 @@
 import evaluate
+import torch
 from bert_score import BERTScorer
 from tqdm.auto import tqdm
 
 from eval.constants import (
+    BERTSCORE_BATCH_SIZE,
     BERTSCORE_MAX_LENGTH,
     BERTSCORE_MODEL,
 )
 
 
 class CommentScorer:
-    """Computes the three metrics over batches of (prediction, reference) pairs."""
-
     def __init__(self):
         self._bleu = None
         self._rouge = None
@@ -21,9 +21,12 @@ class CommentScorer:
         # We load them lazily so that runs with no results to score don't pay the cost of loading BERTScore.
         if self._rouge is None or self._bertscore is None:
             self._rouge = evaluate.load("rouge")
+            # BERTScore is the expensive metric, so run it on the GPU when one is
+            # present and fall back to CPU otherwise (e.g. local runs).
+            device = "cuda" if torch.cuda.is_available() else "cpu"
             # Use BERTScorer directly (not evaluate's wrapper) so we can reach the
             # tokenizer and clamp its overflowing model_max_length.
-            self._bertscore = BERTScorer(model_type=BERTSCORE_MODEL)
+            self._bertscore = BERTScorer(model_type=BERTSCORE_MODEL, device=device)
             self._bertscore._tokenizer.model_max_length = BERTSCORE_MAX_LENGTH
 
     def _load_bleu(self):
@@ -50,11 +53,10 @@ class CommentScorer:
 
         # Score in batches so BERTScore can run forward passes in parallel
         scores = []
-        BATCH_SIZE = 64
         with tqdm(total=len(predictions), desc=desc, unit="pair") as progress_bar:
-            for start in range(0, len(predictions), BATCH_SIZE):
-                pred_batch = predictions[start : start + BATCH_SIZE]
-                ref_batch = references[start : start + BATCH_SIZE]
+            for start in range(0, len(predictions), BERTSCORE_BATCH_SIZE):
+                pred_batch = predictions[start : start + BERTSCORE_BATCH_SIZE]
+                ref_batch = references[start : start + BERTSCORE_BATCH_SIZE]
 
                 # We use per comment pair BLEU 4 here (not corpus-level).
                 # Smoothing is needed, otherwise any pair without a matching
@@ -72,7 +74,11 @@ class CommentScorer:
                     use_aggregator=False,
                 )["rougeL"]
                 # BERTScorer.score returns (P, R, F) tensors. We keep F1.
-                bertscore_f1 = self._bertscore.score(pred_batch, ref_batch)[2].tolist()
+                # Pass batch_size so its internal batching matches the chunk we
+                # feed it rather than defaulting back to 64.
+                bertscore_f1 = self._bertscore.score(
+                    pred_batch, ref_batch, batch_size=BERTSCORE_BATCH_SIZE
+                )[2].tolist()
 
                 scores.extend(
                     {"bleu4": bleu, "rougeL": rouge, "bertscore_f1": bert}

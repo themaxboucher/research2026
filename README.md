@@ -19,7 +19,7 @@ for generate). The submit scripts create the `.venv` and install deps for you.
 ./collect/scripts/submit.sh       # 1. mine repos into a dataset
 sbatch collect/scripts/filter.sh  #    filter it down to the files worth generating on
 ./generate/scripts/submit.sh      # 2. query the LLMs for comment predictions
-python -m eval.eval               # 3. score predictions (BLEU / ROUGE / BERTScore)
+./eval/scripts/submit.sh          # 3. score predictions (BLEU / ROUGE / BERTScore)
 ```
 
 Each `submit.sh` runs a prepare step, submits the mining/generation job array,

@@ -1,13 +1,13 @@
-LOCATION_METRICS_FILENAME = "location_metrics.json"
-REGENERATE_METRICS_FILENAME = "regenerate_metrics.json"
-LOCATION_HISTOGRAM_FILENAME = "location_metrics_hist.png"
-REGENERATE_HISTOGRAM_FILENAME = "regenerate_metrics_hist.png"
+LOCATION_METRICS_FILENAME = "location_metrics"
+REGENERATE_METRICS_FILENAME = "regenerate_metrics"
 
-HISTOGRAM_METRICS = ("bleu4", "rougeL", "bertscore_f1")
+SCORE_METRICS = ("bleu4", "rougeL", "bertscore_f1")
 
 BERTSCORE_MODEL = "microsoft/deberta-xlarge-mnli"
 
 BERTSCORE_MAX_LENGTH = 512
+
+BERTSCORE_BATCH_SIZE = 256
 
 BASELINE_MODEL = "<baseline-software>"
 BASELINE_GENERAL_MODEL = "<baseline-general>"
