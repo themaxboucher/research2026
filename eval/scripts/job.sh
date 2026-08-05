@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=evaluate-comments
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1
