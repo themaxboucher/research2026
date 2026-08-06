@@ -37,6 +37,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Set up the Python environment. --skip-setup reuses an existing .venv as-is
+module load gcc arrow/25.0.0
 module load python/3.13
 
 if [[ -n "$SKIP_SETUP" ]]; then
