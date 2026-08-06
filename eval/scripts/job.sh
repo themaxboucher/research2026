@@ -1,9 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=evaluate-comments
-#SBATCH --time=01:00:00
+#SBATCH --time=06:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --output=logs/evaluate-comments-%A_%a.out
 #SBATCH --error=logs/evaluate-comments-%A_%a.err
 
@@ -18,16 +17,11 @@ module load python/3.13
 source .venv/bin/activate
 
 export TQDM_DISABLE=1
-# Weights and metric scripts were pre-cached by submit.sh. The compute node can
-# stay offline.
+
+# Weights and metric scripts were pre-cached by submit.sh. The compute node can stay offline.
 export HF_HUB_OFFLINE=1
-# BERTScore runs on the GPU; BLEU and ROUGE stay on the CPU. Cap torch's thread
-# pool to the cores SLURM granted rather than every core on the node.
+
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
-# Scoring batches vary in size because sentences are padded to the longest one
-# in the batch. Expandable segments let the allocator grow a block in place
-# instead of stranding memory in pools sized for earlier batches.
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 python -m eval.eval \
   --dataset-dir "${DATASET_DIR}" \
