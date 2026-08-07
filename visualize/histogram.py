@@ -9,12 +9,10 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-from eval.constants import SCORE_METRICS
-from generate.constants import LOCATION_FILENAME, REGENERATE_FILENAME
+from eval.constants import BASELINE_MODELS, SCORE_METRICS, UNKNOWN_MODEL
+from generate.constants import LOCATION_FILENAME
 from storage import load_from_jsonl
 from storage.runs import resolve_dataset_and_run
-
-UNKNOWN_MODEL = "<unknown>"
 
 METRIC_LABELS = {
     "bleu4": "BLEU-4",
@@ -25,30 +23,21 @@ METRIC_LABELS = {
 BIN_COUNT = 50
 FILL_ALPHA = 0.25
 OUTLINE_WIDTH = 1.8
+BASELINE_ALPHA = 0.6
+BASELINE_WIDTH = 1.2
+BASELINE_STYLE = ":"
+LEGEND_MAX_COLUMNS = 3
+LEGEND_ROW_HEIGHT = 0.07
 FIGURE_SIZE = (15, 5)
 FIGURE_DPI = 150
 PALETTE = "tab10"
 
 
 def _iter_location_scores(records: list[dict]):
-    """Every scored location result as (model, scores). Results that were never
-    usable carry `scores: null` and are skipped."""
     for record in records:
         for comment_generation in record.get("comment_generations") or []:
             for result in comment_generation.get("results") or []:
                 scores = result.get("scores")
-                if scores is not None:
-                    yield result.get("model") or UNKNOWN_MODEL, scores
-
-
-def _iter_regenerate_scores(records: list[dict]):
-    """Every scored regeneration extraction as (model, scores). Only extractions
-    that placed the comment correctly and had usable text on both sides were
-    scored, so the rest carry `scores: null` and are skipped."""
-    for record in records:
-        for result in record.get("results") or []:
-            for extraction in result.get("extractions") or []:
-                scores = extraction.get("scores")
                 if scores is not None:
                     yield result.get("model") or UNKNOWN_MODEL, scores
 
@@ -64,8 +53,6 @@ def _values_by_model(score_pairs) -> dict[str, dict[str, list[float]]]:
 
 
 def _model_colors(models: list[str]) -> dict[str, tuple]:
-    # Colors follow the sorted model order so a model keeps the same color
-    # across both approaches' figures.
     palette = plt.get_cmap(PALETTE)
     return {model: palette(index % palette.N) for index, model in enumerate(models)}
 
@@ -94,11 +81,23 @@ def _plot_metric(axes, metric: str, values_by_model: dict, colors: dict) -> None
             "density": True,
             "color": colors[model],
         }
+        label = f"{model} (n={len(values)})"
+        if model in BASELINE_MODELS:
+            axes.hist(
+                values,
+                histtype="step",
+                label=label,
+                linestyle=BASELINE_STYLE,
+                linewidth=BASELINE_WIDTH,
+                alpha=BASELINE_ALPHA,
+                **shared_options,
+            )
+            continue
         axes.hist(
             values,
             histtype="stepfilled",
             alpha=FILL_ALPHA,
-            label=f"{model} (n={len(values)})",
+            label=label,
             **shared_options,
         )
         # The outline is drawn separately so it stays fully opaque over the
@@ -117,9 +116,14 @@ def _plot_scores(values_by_model: dict, title: str, output_path: Path) -> None:
 
     figure.suptitle(title)
     handles, labels = axes_row[0].get_legend_handles_labels()
-    figure.legend(handles, labels, loc="lower center", ncols=len(models))
+    # Three baselines on top of the models overflow a single legend row, so wrap
+    # once the entries stop fitting across the figure.
+    legend_rows = -(-len(models) // LEGEND_MAX_COLUMNS)
+    figure.legend(
+        handles, labels, loc="lower center", ncols=min(len(models), LEGEND_MAX_COLUMNS)
+    )
     # Leave room at the bottom for the shared legend and at the top for the title.
-    figure.tight_layout(rect=(0, 0.08, 1, 0.96))
+    figure.tight_layout(rect=(0, LEGEND_ROW_HEIGHT * legend_rows, 1, 0.96))
     figure.savefig(output_path, dpi=FIGURE_DPI)
     plt.close(figure)
 
@@ -176,7 +180,7 @@ def main():
 
     approaches = (
         (LOCATION_FILENAME, _iter_location_scores),
-        (REGENERATE_FILENAME, _iter_regenerate_scores),
+        # No regeneration evaluation yet.
     )
     for filename, iter_scores in approaches:
         _plot_approach(run_directory, dataset_directory, filename, iter_scores)
