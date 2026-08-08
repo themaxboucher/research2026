@@ -21,7 +21,7 @@ class CommentScorer:
         # Load the metric models if they haven't been loaded yet.
         # We load them lazily so that runs with no results to score don't pay the cost of loading BERTScore.
         if self._rouge is None or self._bertscore is None:
-            self._rouge = evaluate.load("rouge")
+            self._rouge = evaluate.load("rouge", keep_in_memory=True)
             # BERTScore is the expensive metric, so run it on the GPU when one is
             # present and fall back to CPU otherwise (e.g. local runs).
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -34,7 +34,7 @@ class CommentScorer:
         # BLEU loads separately because corpus_bleu is needed at aggregate
         # time even when there are no new pairs to score.
         if self._bleu is None:
-            self._bleu = evaluate.load("bleu")
+            self._bleu = evaluate.load("bleu", keep_in_memory=True)
 
     def corpus_bleu(self, predictions: list[str], references: list[str]) -> float:
         """Standard (unsmoothed) corpus-level BLEU-4 over all pairs at once."""
