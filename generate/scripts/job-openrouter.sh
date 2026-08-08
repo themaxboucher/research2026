@@ -4,7 +4,6 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH --output=logs/generate-comments-openrouter-%A_%a.out
-#SBATCH --error=logs/generate-comments-openrouter-%A_%a.err
 
 set -euo pipefail
 

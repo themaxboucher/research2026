@@ -4,7 +4,6 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=256G
 #SBATCH --output=logs/mine-code-comments-%A_%a.out
-#SBATCH --error=logs/mine-code-comments-%A_%a.err
 
 set -euo pipefail
 

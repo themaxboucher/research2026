@@ -4,7 +4,6 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
 #SBATCH --output=logs/filter-dataset-%j.out
-#SBATCH --error=logs/filter-dataset-%j.err
 
 set -euo pipefail
 

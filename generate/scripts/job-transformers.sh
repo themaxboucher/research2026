@@ -5,7 +5,6 @@
 #SBATCH --mem=64G
 #SBATCH --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --output=logs/generate-comments-%A_%a.out
-#SBATCH --error=logs/generate-comments-%A_%a.err
 
 set -euo pipefail
 

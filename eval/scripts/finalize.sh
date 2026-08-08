@@ -4,7 +4,6 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --output=logs/evaluate-finalize-%j.out
-#SBATCH --error=logs/evaluate-finalize-%j.err
 
 set -euo pipefail
 
