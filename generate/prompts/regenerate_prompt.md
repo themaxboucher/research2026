@@ -10,8 +10,6 @@ Your task is to rewrite the code below, adding comments wherever a comment would
 {scope_code}
 ```
 
-# Goal
-
 Write the comments a good developer would leave — each one telling the reader something useful that isn't already obvious from the code itself. Base them only on the code shown, and keep them concise. Only comment where a comment genuinely helps; leave the rest of the code uncommented.
 
 Example:
