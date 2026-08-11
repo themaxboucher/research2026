@@ -15,7 +15,7 @@ set -euo pipefail
 # Run everything from the repo root
 cd "$(dirname "$0")/../.."
 
-REPOS_PER_TASK=10
+REPOS_PER_TASK=1
 THROTTLE=20
 DATASET_DIR=""
 ARRAY_INDICES=""
