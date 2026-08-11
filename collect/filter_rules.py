@@ -99,7 +99,7 @@ def _is_visual_separator_comment(comment: str) -> bool:
     return False
 
 
-def _is_ai_authored_file(source_file: dict) -> bool:
+def is_ai_authored_file(source_file: dict) -> bool:
     AI_AUTHORED_IDENTIFIERS = {
         # Anthropic — Claude Code
         "Co-authored-by: Claude",
@@ -175,16 +175,16 @@ def has_eligible_metadata(source_file: dict) -> bool:
     if not is_valid_change_type:
         return False
 
+    has_source_code = source_file.get("source_code") is not None
+    if not has_source_code:
+        return False
+
     has_previous_source_code = source_file.get("previous_source_code") is not None
     if not has_previous_source_code:
         return False
 
     has_commit_message = source_file.get("commit_message") is not None
     if not has_commit_message:
-        return False
-
-    is_ai_authored = _is_ai_authored_file(source_file)
-    if is_ai_authored:
         return False
 
     return True

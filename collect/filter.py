@@ -8,6 +8,7 @@ from collect.comments import get_comments_from_file
 from collect.constants import DATASET_FILENAME, RAW_DATASET_FILENAME
 from collect.filter_rules import (
     has_eligible_metadata,
+    is_ai_authored_file,
     target_comments,
 )
 from storage import append_to_jsonl, iter_from_jsonl, save_to_jsonl
@@ -22,7 +23,7 @@ def _add_parsed_comments(file_data):
     previous_source_code = file_data.get("previous_source_code")
 
     if source_code is None or previous_source_code is None:
-        return file_data
+        raise ValueError("Both source_code and previous_source_code must be present")
 
     try:
         file_data["comments"] = get_comments_from_file(
@@ -41,6 +42,10 @@ def _filter_dataset(dataset_directory: Path) -> None:
         "raw_num_repos": 0,
         "raw_num_commits": 0,
         "raw_num_files": 0,
+        "num_files_wrong_metadata": 0,
+        "num_files_ai_authored": 0,
+        "num_files_parse_errors": 0,
+        "num_files_no_target_comments": 0,
         "num_repos": 0,
         "num_commits": 0,
         "num_files": 0,
@@ -71,16 +76,24 @@ def _filter_dataset(dataset_directory: Path) -> None:
             manifest["raw_num_commits"] += 1
             counted_raw_commits.add(commit_key)
 
-        # Reject records ruled out from metadata alone before parsing, so
-        # non-Python files aren't tokenized as Python only to be discarded.
         if not has_eligible_metadata(record):
+            manifest["num_files_wrong_metadata"] += 1
+            continue
+
+        if is_ai_authored_file(record):
+            manifest["num_files_ai_authored"] += 1
             continue
 
         record = _add_parsed_comments(record)
         manifest["num_comments"] += len(record["comments"])
 
+        if "error" in record and record.get("error") is not None:
+            manifest["num_files_parse_errors"] += 1
+            continue
+
         targets = target_comments(record)
         if not targets:
+            manifest["num_files_no_target_comments"] += 1
             continue
 
         manifest["num_target_comments"] += len(targets)
@@ -103,16 +116,6 @@ def _filter_dataset(dataset_directory: Path) -> None:
         append_to_jsonl(kept_records, dataset_directory, DATASET_FILENAME)
 
     write_manifest(dataset_directory, manifest)
-    logging.info(
-        "Kept %d of %d files (%d of %d commits, %d of %d repos) with %d target comments",
-        manifest["num_files"],
-        manifest["raw_num_files"],
-        manifest["num_commits"],
-        manifest["raw_num_commits"],
-        manifest["num_repos"],
-        manifest["raw_num_repos"],
-        manifest["num_target_comments"],
-    )
 
 
 def _parse_args():
