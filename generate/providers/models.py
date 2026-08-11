@@ -22,7 +22,9 @@ MODEL_PROFILES = {
     "transformers": ModelProfile(
         model_names=[
             "meta-llama/Llama-3.1-8B-Instruct",
+            "meta-llama/CodeLlama-7b-Instruct-hf",
             "Qwen/Qwen2.5-7B-Instruct",
+            "deepseek-ai/deepseek-coder-6.7b-instruct",
         ],
         get_completion=transformers.get_completion,
         # The GPU serializes forward passes. Concurrent files would only slow each other down.
