@@ -10,8 +10,9 @@ from pydriller import Repository
 from tqdm.auto import tqdm
 
 from collect.constants import (
-    CUTOFF_DATE,
+    COLLECTION_END_DATE,
     DEFAULT_MAX_REPOS,
+    LLM_CUTOFF_DATE,
     MINED_REPOS_FILENAME,
     RAW_DATASET_FILENAME,
 )
@@ -22,10 +23,7 @@ from storage import (
     load_from_jsonl,
     truncate_broken_tail,
 )
-from storage.datasets import (
-    dataset_directory_timestamp,
-    resolve_dataset_directory,
-)
+from storage.datasets import resolve_dataset_directory
 
 
 def _get_shard_filenames(task_id: int, num_tasks: int) -> tuple[str, str]:
@@ -80,14 +78,15 @@ def _sort_repos_by_size(repos: list[dict]) -> list[dict]:
 
 
 def _mine_repo(
-    repo_url: str, repo_full_name: str, branch: str, since: str, to: datetime
+    repo_url: str, repo_full_name: str, branch: str, since: str, to: str
 ) -> list[dict]:
     datetime_since = datetime.strptime(since, "%Y-%m-%d")
+    datetime_to = datetime.strptime(to, "%Y-%m-%d")
 
     repo = Repository(
         repo_url,
         since=datetime_since,
-        to=to,
+        to=datetime_to,
         only_in_branch=branch,
         only_no_merge=True,
         only_modifications_with_file_types=[".py"],
@@ -129,7 +128,7 @@ MINING_RETRY_DELAY_SECONDS = 3
 
 
 def _mine_repo_with_retries(
-    repo_url: str, repo_full_name: str, branch: str, since: str, to: datetime
+    repo_url: str, repo_full_name: str, branch: str, since: str, to: str
 ) -> list[dict]:
     for attempt in range(1, MINING_MAX_ATTEMPTS + 1):
         try:
@@ -154,7 +153,6 @@ def _mine_and_persist_repo(
     write_lock: Lock,
     data_filename: str,
     mined_filename: str,
-    mining_end: datetime,
 ) -> int:
     repo_url = repo["html_url"]
     try:
@@ -162,8 +160,8 @@ def _mine_and_persist_repo(
             repo_url,
             repo["full_name"],
             repo["default_branch"],
-            CUTOFF_DATE,
-            mining_end,
+            LLM_CUTOFF_DATE,
+            COLLECTION_END_DATE,
         )
     except Exception as error:
         with write_lock:
@@ -197,7 +195,6 @@ def _collect(
         data_filename, mined_filename = RAW_DATASET_FILENAME, MINED_REPOS_FILENAME
 
     all_repos = get_repos(repo_min_stars, max_repos, dataset_dir)
-    mining_end = dataset_directory_timestamp(dataset_dir)
 
     sorted_repos = _sort_repos_by_size(all_repos)
 
@@ -229,7 +226,6 @@ def _collect(
                 write_lock,
                 data_filename,
                 mined_filename,
-                mining_end,
             )
             for repo in repos
         ]

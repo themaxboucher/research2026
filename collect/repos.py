@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from collect.constants import CUTOFF_DATE, REPO_LANGUAGE, REPOS_CACHE_FILENAME
+from collect.constants import LLM_CUTOFF_DATE, REPO_LANGUAGE, REPOS_CACHE_FILENAME
 from collect.github import search_repos
 from storage import append_to_jsonl, load_from_jsonl
 
@@ -18,7 +18,7 @@ def get_repos(
     repos = search_repos(
         language=REPO_LANGUAGE,
         min_stars=repo_min_stars,
-        pushed_after=CUTOFF_DATE,
+        pushed_after=LLM_CUTOFF_DATE,
         limit=max_repos,
     )[:max_repos]
 
