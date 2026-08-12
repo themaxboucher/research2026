@@ -1,5 +1,4 @@
 LOCATION_METRICS_FILENAME = "location_metrics"
-REGENERATE_METRICS_FILENAME = "regenerate_metrics"
 
 SCORE_METRICS = ("bleu4", "rougeL", "bertscore_f1")
 

@@ -5,6 +5,8 @@ from storage.jsonl import (
     load_from_jsonl,
     merge_jsonl_shards,
     save_to_jsonl,
+    shard_filename,
+    shard_suffix,
     truncate_broken_tail,
 )
 
@@ -15,5 +17,7 @@ __all__ = [
     "load_from_jsonl",
     "merge_jsonl_shards",
     "save_to_jsonl",
+    "shard_filename",
+    "shard_suffix",
     "truncate_broken_tail",
 ]

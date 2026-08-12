@@ -103,6 +103,15 @@ def drop_trailing_records(
     return removed_records
 
 
+def shard_suffix(task_id: int, num_tasks: int) -> str:
+    digit_width = max(len(str(num_tasks - 1)), 1)
+    return f"{task_id:0{digit_width}d}"
+
+
+def shard_filename(filename: str, suffix: str | None) -> str:
+    return f"{filename}.{suffix}" if suffix is not None else filename
+
+
 def merge_jsonl_shards(
     directory: Path, filename: str, *, delete_shards: bool = False
 ) -> int:

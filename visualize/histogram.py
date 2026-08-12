@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from eval.constants import BASELINE_MODELS, SCORE_METRICS, UNKNOWN_MODEL
-from generate.constants import LOCATION_FILENAME
+from generate.constants import GENERATE_FILENAME
 from storage import load_from_jsonl
 from storage.runs import resolve_dataset_and_run
 
@@ -33,7 +33,7 @@ FIGURE_DPI = 150
 PALETTE = "tab10"
 
 
-def _iter_location_scores(records: list[dict]):
+def _iter_scores(records: list[dict]):
     for record in records:
         for comment_generation in record.get("comment_generations") or []:
             for result in comment_generation.get("results") or []:
@@ -128,16 +128,14 @@ def _plot_scores(values_by_model: dict, title: str, output_path: Path) -> None:
     plt.close(figure)
 
 
-def _plot_approach(
-    run_dir: Path, dataset_dir: Path, filename: str, iter_scores
-) -> None:
+def _plot(run_dir: Path, dataset_dir: Path, filename: str) -> None:
     scored_filename = filename + "_scored"
     if not (run_dir / f"{scored_filename}.jsonl").exists():
         logging.info("No %s.jsonl in %s, skipping", scored_filename, run_dir.name)
         return
 
     records = load_from_jsonl(run_dir, scored_filename)
-    values_by_model = _values_by_model(iter_scores(records))
+    values_by_model = _values_by_model(_iter_scores(records))
     if not values_by_model:
         logging.warning(
             "No scored results in %s.jsonl, writing no figure", scored_filename
@@ -178,12 +176,7 @@ def main():
         args.dataset_dir, args.run_dir
     )
 
-    approaches = (
-        (LOCATION_FILENAME, _iter_location_scores),
-        # No regeneration evaluation yet.
-    )
-    for filename, iter_scores in approaches:
-        _plot_approach(run_directory, dataset_directory, filename, iter_scores)
+    _plot(run_directory, dataset_directory, GENERATE_FILENAME)
 
 
 if __name__ == "__main__":

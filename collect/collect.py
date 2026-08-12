@@ -21,14 +21,14 @@ from storage import (
     append_to_jsonl,
     drop_trailing_records,
     load_from_jsonl,
+    shard_suffix,
     truncate_broken_tail,
 )
 from storage.datasets import resolve_dataset_directory
 
 
 def _get_shard_filenames(task_id: int, num_tasks: int) -> tuple[str, str]:
-    digit_width = max(len(str(num_tasks - 1)), 1)
-    formatted_suffix = f"{task_id:0{digit_width}d}"
+    formatted_suffix = shard_suffix(task_id, num_tasks)
     return (
         f"{RAW_DATASET_FILENAME}.{formatted_suffix}",
         f"{MINED_REPOS_FILENAME}.{formatted_suffix}",

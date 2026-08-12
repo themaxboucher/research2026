@@ -70,7 +70,7 @@ def _window_around(anchor_line: int, line_count: int) -> tuple[int, int]:
     return start, start + window_length - 1
 
 
-def scope_bounds(source_code: str, source_lines: list[str], anchor_line: int) -> tuple[int, int]:
+def _scope_bounds(source_code: str, source_lines: list[str], anchor_line: int) -> tuple[int, int]:
     """Line bounds (1-indexed, inclusive) of the local scope enclosing the
     comment. Falls back to a capped window around the comment at module level."""
     qualified_name = enclosing_scope_name(source_code, anchor_line)
@@ -84,7 +84,7 @@ def scope_bounds(source_code: str, source_lines: list[str], anchor_line: int) ->
     return _window_around(anchor_line, len(source_lines))
 
 
-def scope_code(source_code: str, comment_data: dict) -> str:
+def prompt_code(source_code: str, comment_data: dict) -> str:
     """Return the source of the local scope enclosing the target comment, with
     the target comment itself replaced by a placeholder.
 
@@ -95,7 +95,7 @@ def scope_code(source_code: str, comment_data: dict) -> str:
     PLACEHOLDER_COMMENT = "Add the comment here"
 
     source_lines = source_code.splitlines()
-    start, end = scope_bounds(source_code, source_lines, comment_data["start_line"])
+    start, end = _scope_bounds(source_code, source_lines, comment_data["start_line"])
 
     target_start = comment_data["start_line"]
     target_end = comment_data["end_line"]

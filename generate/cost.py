@@ -6,7 +6,7 @@ from pathlib import Path
 
 import tiktoken
 
-from generate.constants import LOCATION_FILENAME
+from generate.constants import GENERATE_FILENAME
 from storage.jsonl import iter_from_jsonl
 from storage.runs import resolve_dataset_and_run
 
@@ -117,7 +117,7 @@ def collect_token_stats(
     stats = RunTokenStats()
 
     for record_number, record in enumerate(
-        iter_from_jsonl(run_directory, LOCATION_FILENAME), start=1
+        iter_from_jsonl(run_directory, GENERATE_FILENAME), start=1
     ):
         _add_record_to_stats(stats, _extract_record_texts(record), encoding)
         if record_number % PROGRESS_LOG_INTERVAL_RECORDS == 0:

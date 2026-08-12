@@ -7,7 +7,7 @@ You are a senior Python developer ensuring the code is as clear and readable as 
 Your task is to write the single best {comment_type} comment to replace the comment `# Add the comment here`.
 
 ```python
-{scope_code}
+{code}
 ```
 
 # Goal

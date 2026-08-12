@@ -1,25 +1,26 @@
 import argparse
 import itertools
 import logging
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
+from typing import Callable
 
-from generate.approaches import (
-    location_generate_for_file,
-    regenerate_generate_for_file,
-)
+from collect.filter_rules import target_comments
 from generate.constants import (
-    LOCATION_FILENAME,
+    GENERATE_FILENAME,
     PROGRESS_FILENAME,
-    REGENERATE_FILENAME,
     SOURCE_FILENAME,
 )
-from generate.providers.models import ModelProfile, get_model_profile
+from generate.model_output import strip_output_wrappers
+from generate.parse_code import prompt_code
+from generate.prompt import build_location_prompt
+from generate.providers.models import get_model_profile
 from storage import (
     append_to_jsonl,
     drop_trailing_records,
     iter_from_jsonl,
     save_to_jsonl,
+    shard_filename,
+    shard_suffix,
     truncate_broken_tail,
 )
 from storage.runs import (
@@ -29,200 +30,248 @@ from storage.runs import (
 )
 
 
-def _file_key(record: dict) -> tuple[str | None, str | None, str | None]:
+def _record_key(record: dict) -> tuple[str | None, str | None, str | None]:
     return (record.get("repo_name"), record.get("new_path"), record.get("commit_hash"))
 
 
-def _completed_file_keys(
+def _completed_record_keys(
     run_dir: Path, progress_filename: str
 ) -> set[tuple[str | None, str | None, str | None]]:
     if not (run_dir / f"{progress_filename}.jsonl").exists():
         return set()
-    return {_file_key(record) for record in iter_from_jsonl(run_dir, progress_filename)}
+    return {
+        _record_key(record) for record in iter_from_jsonl(run_dir, progress_filename)
+    }
 
 
-def _shard_suffix(task_id: int, num_tasks: int) -> str:
-    digit_width = max(len(str(num_tasks - 1)), 1)
-    return f"{task_id:0{digit_width}d}"
+def _task_assignment(
+    task_id: int, num_partitions: int, model_names: list[str]
+) -> tuple[str, int]:
+    model_index, partition = divmod(task_id, num_partitions)
+    return model_names[model_index], partition
 
 
-def _shard_filename(filename: str, suffix: str | None) -> str:
-    return f"{filename}.{suffix}" if suffix is not None else filename
-
-
-def _output_filenames(approaches: list[str], suffix: str | None) -> list[str]:
-    return [
-        _shard_filename(filename, suffix)
-        for filename, approach in (
-            (LOCATION_FILENAME, "location"),
-            (REGENERATE_FILENAME, "regenerate"),
+def _generate_with_llm(
+    prompt: str,
+    filepath: str,
+    model_name: str,
+    get_completion: Callable[[str, str], str],
+) -> list[dict]:
+    raw_response = None
+    try:
+        raw_response = get_completion(model_name, prompt)
+        comment_text = strip_output_wrappers(raw_response)
+        if not comment_text:
+            raise ValueError("Model returned an empty comment")
+    except Exception as error:
+        logging.warning(
+            "Failed to generate comment in %s with model %s: %s",
+            filepath,
+            model_name,
+            error,
         )
-        if approach in approaches
+        return [
+            {
+                "model": model_name,
+                "raw_response": raw_response,
+                "comment_text": None,
+                "error": str(error),
+            }
+        ]
+    return [
+        {
+            "model": model_name,
+            "raw_response": raw_response,
+            "comment_text": comment_text,
+            "error": None,
+        }
     ]
 
 
-def _generate_for_file(
-    file_data: dict,
-    model_profile: ModelProfile,
-    approaches: list[str],
-) -> list[tuple[str, list[dict]]]:
-    outputs: list[tuple[str, list[dict]]] = []
-    if "regenerate" in approaches:
-        scope_records = regenerate_generate_for_file(file_data, model_profile)
-        outputs.append((REGENERATE_FILENAME, scope_records))
-    if "location" in approaches:
-        location_record = location_generate_for_file(file_data, model_profile)
-        outputs.append((LOCATION_FILENAME, [location_record]))
-    return outputs
+def _generate_for_comment(
+    dataset_record: dict,
+    comment_data: dict,
+    model_name: str,
+    get_completion: Callable[[str, str], str],
+) -> dict:
+    source_code = dataset_record["source_code"]
+    filepath = dataset_record["new_path"]
+
+    code = prompt_code(source_code, comment_data)
+    prompt = build_location_prompt(
+        dataset_record["repo_name"],
+        filepath,
+        comment_data,
+        commit_message=dataset_record["commit_message"],
+        code=code,
+    )
+
+    results = _generate_with_llm(prompt, filepath, model_name, get_completion)
+    return {
+        "type": comment_data["type"],
+        "status": comment_data["status"],
+        "start_line": comment_data["start_line"],
+        "end_line": comment_data["end_line"],
+        "anchor": comment_data.get("anchor"),
+        "comment": comment_data.get("comment"),
+        "prompt": prompt,
+        "results": results,
+    }
 
 
-def _generate(dataset_dir: Path, run_dir: Path, task_id: int, config: dict) -> None:
-    num_tasks = config["num_tasks"]
-    approaches = config["approaches"]
+def _generate_for_record(
+    dataset_record: dict, model_name: str, get_completion: Callable[[str, str], str]
+) -> dict:
+    comment_generations = []
+    for comment_data in target_comments(dataset_record):
+        try:
+            comment_generations.append(
+                _generate_for_comment(
+                    dataset_record, comment_data, model_name, get_completion
+                )
+            )
+        except Exception as error:
+            logging.warning(
+                "Skipping a comment in %s: could not build generation inputs: %s",
+                dataset_record.get("new_path"),
+                error,
+            )
+
+    return {
+        "repo_name": dataset_record["repo_name"],
+        "commit_hash": dataset_record.get("commit_hash"),
+        "new_path": dataset_record["new_path"],
+        "model": model_name,
+        "comment_generations": comment_generations,
+    }
+
+
+def _generate(
+    dataset_dir: Path,
+    run_dir: Path,
+    task_id: int,
+    config: dict,
+    model_names: list[str],
+) -> None:
+    num_partitions = config["num_partitions"]
     limit = config["max_generate"]
     model_profile, _ = get_model_profile()
 
-    suffix = _shard_suffix(task_id, num_tasks)
-    progress_filename = _shard_filename(PROGRESS_FILENAME, suffix)
-    output_filenames = _output_filenames(approaches, suffix)
+    array_size = num_partitions * len(model_names)
+    model_name, partition = _task_assignment(task_id, num_partitions, model_names)
 
-    concurrent_files = model_profile.concurrent_files
+    # The suffix is the flat array index, so every (model, partition) pair gets
+    # its own output and progress shards and finalize merges them all.
+    suffix = shard_suffix(task_id, array_size)
+    progress_filename = shard_filename(PROGRESS_FILENAME, suffix)
+    output_filename = shard_filename(GENERATE_FILENAME, suffix)
+
+    logging.info(
+        "Task %d generates with %s over partition %d of %d",
+        task_id,
+        model_name,
+        partition,
+        num_partitions,
+    )
 
     # Resume an interrupted run rather than overwriting it
     truncate_broken_tail(run_dir, progress_filename)
-    completed_keys = _completed_file_keys(run_dir, progress_filename)
-    for filename in output_filenames:
-        truncate_broken_tail(run_dir, filename)
-        drop_trailing_records(
-            run_dir,
-            filename,
-            lambda record: _file_key(record) not in completed_keys,
-        )
+    completed_keys = _completed_record_keys(run_dir, progress_filename)
+
+    truncate_broken_tail(run_dir, output_filename)
+    drop_trailing_records(
+        run_dir,
+        output_filename,
+        lambda record: _record_key(record) not in completed_keys,
+    )
     if completed_keys:
         logging.info(
-            "Resuming run %r at %s (%d files already done).",
+            "Resuming run %r at %s (%d records already done for %s).",
             run_dir.name,
             dataset_dir.name,
             len(completed_keys),
+            model_name,
         )
 
-    # Create empty output files for a fresh run
-    for filename in output_filenames:
-        if not (run_dir / f"{filename}.jsonl").exists():
-            save_to_jsonl([], run_dir, filename)
+    # Create empty output file for a fresh run
+    if not (run_dir / f"{output_filename}.jsonl").exists():
+        save_to_jsonl([], run_dir, output_filename)
 
-    files_data = iter_from_jsonl(dataset_dir, SOURCE_FILENAME)
+    dataset_records = iter_from_jsonl(dataset_dir, SOURCE_FILENAME)
 
     if limit is not None:
-        files_data = itertools.islice(files_data, limit)
+        dataset_records = itertools.islice(dataset_records, limit)
 
-    # Striding over the eligible files deterministically partitions files across tasks.
-    files_data = itertools.islice(files_data, task_id, None, num_tasks)
+    # Striding over the eligible records deterministically partitions them. Every
+    # model walks the same partitions, so a record's generations all come from
+    # the same stride regardless of which model ran it.
+    dataset_records = itertools.islice(dataset_records, partition, None, num_partitions)
 
-    # Filter out files already completed by an earlier run of this generation. This
-    # runs after `limit` so the target set matches a fresh run's first `limit`
-    # eligible files. We just don't redo the ones already finished.
-    files_data = (
-        file_data
-        for file_data in files_data
-        if _file_key(file_data) not in completed_keys
+    # Filter out records already completed by an earlier run of this generation.
+    # This runs after `limit` so the target set matches a fresh run's first
+    # `limit` eligible records. We just don't redo the ones already finished.
+    dataset_records = (
+        dataset_record
+        for dataset_record in dataset_records
+        if _record_key(dataset_record) not in completed_keys
     )
 
-    # Count files already done so progress logging reflects the whole run.
-    files_processed = len(completed_keys)
+    # Count records already done so progress logging reflects the whole task.
+    records_processed = len(completed_keys)
 
-    # Files are generated concurrently but submitted through a window of at
-    # most `concurrent_files`, so the source JSONL streams instead of being
-    # held in memory. All appends happen here on the main thread.
-    with ThreadPoolExecutor(max_workers=concurrent_files) as executor:
-        in_flight: dict[Future, dict] = {}
-
-        def submit_next_file() -> bool:
-            file_data = next(files_data, None)
-            if file_data is None:
-                return False
-            future = executor.submit(
-                _generate_for_file, file_data, model_profile, approaches
+    for dataset_record in dataset_records:
+        record_key = {
+            "repo_name": dataset_record.get("repo_name"),
+            "new_path": dataset_record.get("new_path"),
+            "commit_hash": dataset_record.get("commit_hash"),
+            "model": model_name,
+        }
+        try:
+            generation_record = _generate_for_record(
+                dataset_record, model_name, model_profile.get_completion
             )
-            in_flight[future] = {
-                "repo_name": file_data.get("repo_name"),
-                "new_path": file_data.get("new_path"),
-                "commit_hash": file_data.get("commit_hash"),
-            }
-            return True
-
-        for _ in range(concurrent_files):
-            if not submit_next_file():
-                break
-
-        while in_flight:
-            completed, _ = wait(in_flight, return_when=FIRST_COMPLETED)
-            for future in completed:
-                file_key = in_flight.pop(future)
-                try:
-                    outputs = future.result()
-                except Exception as error:
-                    # A failed file is recorded as done (with its error) so one
-                    # pathological input can't wedge the task or spin forever
-                    # on resume; it just produces no output records.
-                    logging.warning(
-                        "Generation failed for %s: %s", file_key["new_path"], error
-                    )
-                    append_to_jsonl(
-                        [{**file_key, "error": str(error)}],
-                        run_dir,
-                        progress_filename,
-                    )
-                else:
-                    for output_filename, records in outputs:
-                        append_to_jsonl(
-                            records, run_dir, _shard_filename(output_filename, suffix)
-                        )
-                    # Log only after every approach's output is on disk, so a
-                    # crash mid-write leaves this file uncommitted and it is redone.
-                    append_to_jsonl(
-                        [{**file_key, "error": None}], run_dir, progress_filename
-                    )
-                    logging.info(
-                        "Generated comments for %s (file %d)",
-                        file_key["new_path"],
-                        files_processed + 1,
-                    )
-                files_processed += 1
-                submit_next_file()
+        except Exception as error:
+            # A failed record is recorded as done (with its error)
+            logging.warning(
+                "Generation failed for %s: %s", record_key["new_path"], error
+            )
+            append_to_jsonl(
+                [{**record_key, "error": str(error)}], run_dir, progress_filename
+            )
+        else:
+            append_to_jsonl([generation_record], run_dir, output_filename)
+            # Log only after the output record is on disk, so a crash mid-write
+            # leaves this record uncommitted and it is redone.
+            append_to_jsonl([record_key], run_dir, progress_filename)
+            logging.info(
+                "Generated comments for %s with %s (record %d)",
+                record_key["new_path"],
+                model_name,
+                records_processed + 1,
+            )
+        records_processed += 1
 
     logging.info(
-        "Finished generation %r at %s (%d files generated).",
+        "Finished generation %r at %s (%d records generated with %s).",
         run_dir.name,
         dataset_dir.name,
-        files_processed,
+        records_processed,
+        model_name,
     )
 
 
-def _valid_manifest_config(run_dir: Path, task_id: int) -> dict:
+def _valid_manifest_config(run_dir: Path, task_id: int) -> tuple[dict, list[str]]:
     manifest = read_manifest(run_dir)
     if not manifest:
         raise RuntimeError(f"No manifest at {run_dir / MANIFEST_FILENAME}.")
 
     config = manifest.get("config") or {}
 
-    num_tasks = config.get("num_tasks")
-    if num_tasks is None:
+    num_partitions = config.get("num_partitions")
+    if num_partitions is None:
         raise RuntimeError(f"Run {run_dir.name} was not prepared for a job array")
 
-    approaches = config.get("approaches")
-    if approaches is None:
-        raise RuntimeError(
-            f"Run {run_dir.name} has no generation approaches configured"
-        )
-
-    invalid_task_id = not 0 <= task_id < num_tasks
-    if invalid_task_id:
-        raise ValueError(
-            f"--task-id {task_id} is out of range for --num-tasks {num_tasks}"
-        )
-
-    _, model_profile_name = get_model_profile()
+    model_profile, model_profile_name = get_model_profile()
     manifest_profile = manifest.get("model_profile")
     if manifest_profile is not None and manifest_profile != model_profile_name:
         raise RuntimeError(
@@ -231,7 +280,26 @@ def _valid_manifest_config(run_dir: Path, task_id: int) -> dict:
             f"{model_profile_name!r}"
         )
 
-    return config
+    # The array index encodes which model a task runs, so the model list has to
+    # be the one the run was prepared with or tasks would silently change model.
+    model_names = manifest.get("model_names")
+    if model_names is None:
+        raise RuntimeError(f"Run {run_dir.name} has no models recorded")
+    if list(model_names) != list(model_profile.model_names):
+        raise RuntimeError(
+            f"Run {run_dir.name} was prepared with models {list(model_names)} "
+            f"but this task's profile defines {list(model_profile.model_names)}"
+        )
+
+    array_size = num_partitions * len(model_names)
+    invalid_task_id = not 0 <= task_id < array_size
+    if invalid_task_id:
+        raise ValueError(
+            f"--task-id {task_id} is out of range for an array of {array_size} "
+            f"({num_partitions} partitions x {len(model_names)} models)"
+        )
+
+    return config, list(model_names)
 
 
 def _parse_args():
@@ -252,8 +320,9 @@ def _parse_args():
         "--task-id",
         type=int,
         default=None,
-        help="This task's index in the job array. Generates only this task's "
-        "share of the eligible files into its own sharded files",
+        help="This task's index in the job array. Generates one model's "
+        "comments for this task's partition of the eligible records into its "
+        "own output shards",
     )
 
     args = parser.parse_args()
@@ -272,13 +341,14 @@ def main():
 
     dataset_dir, run_dir = resolve_dataset_and_run(args.dataset_dir, args.run_dir)
 
-    manifest_config = _valid_manifest_config(run_dir, args.task_id)
+    manifest_config, model_names = _valid_manifest_config(run_dir, args.task_id)
 
     return _generate(
         dataset_dir,
         run_dir,
         task_id=args.task_id,
         config=manifest_config,
+        model_names=model_names,
     )
 
 

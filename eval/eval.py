@@ -8,14 +8,9 @@ from eval.constants import BASELINE_SEED, BASELINES
 from eval.manifest import read_eval_manifest
 from eval.normalize import normalize_comment
 from eval.scorer import CommentScorer
-from generate.constants import LOCATION_FILENAME
-from storage import iter_from_jsonl, save_to_jsonl
+from generate.constants import GENERATE_FILENAME
+from storage import iter_from_jsonl, save_to_jsonl, shard_suffix
 from storage.runs import resolve_dataset_and_run
-
-
-def _shard_suffix(task_id: int, num_tasks: int) -> str:
-    digit_width = max(len(str(num_tasks - 1)), 1)
-    return f"{task_id:0{digit_width}d}"
 
 
 def _baseline_sentence(
@@ -55,7 +50,7 @@ def _collect_and_extend_pairs(records: list[dict]) -> list[tuple[dict, str, str]
     return pending
 
 
-def score_location_records(records: list[dict], scorer: CommentScorer) -> int:
+def score_records(records: list[dict], scorer: CommentScorer) -> int:
     pending = _collect_and_extend_pairs(records)
     if pending:
         predictions = [prediction for _, prediction, _ in pending]
@@ -72,33 +67,27 @@ def _score_shard(run_dir: Path, task_id: int, num_tasks: int) -> None:
     # BERTScore is loaded lazily, so a shard with nothing scorable (every
     # result errored or came back empty) never pays to load the model.
     scorer = CommentScorer()
-    suffix = _shard_suffix(task_id, num_tasks)
+    suffix = shard_suffix(task_id, num_tasks)
 
-    approaches = (
-        (LOCATION_FILENAME, score_location_records),
-        # We can add evaluation for the regenerate approach later. Ignore it for now.
+    if not (run_dir / f"{GENERATE_FILENAME}.jsonl").exists():
+        logging.warning("No %s.jsonl found. Nothing to score.", GENERATE_FILENAME)
+        return
+
+    # Striding deterministically partitions records across tasks
+    shard_records = list(
+        itertools.islice(iter_from_jsonl(run_dir, GENERATE_FILENAME), task_id, None, num_tasks)
     )
-    for filename, score_records in approaches:
-        if not (run_dir / f"{filename}.jsonl").exists():
-            continue
-
-        # Striding deterministically partitions records across tasks
-        shard_records = list(
-            itertools.islice(
-                iter_from_jsonl(run_dir, filename), task_id, None, num_tasks
-            )
-        )
-        num_scored = score_records(shard_records, scorer)
-        # Write the full stride (scored and unusable alike) so finalize's merge
-        # reconstructs every record, not just the ones scored this pass.
-        save_to_jsonl(shard_records, run_dir, f"{filename + '_scored'}.{suffix}")
-        logging.info(
-            "Task %d: scored %d new %s results across %d records",
-            task_id,
-            num_scored,
-            filename,
-            len(shard_records),
-        )
+    num_scored = score_records(shard_records, scorer)
+    # Write the full stride (scored and unusable alike) so finalize's merge
+    # reconstructs every record, not just the ones scored this pass.
+    save_to_jsonl(shard_records, run_dir, f"{GENERATE_FILENAME + '_scored'}.{suffix}")
+    logging.info(
+        "Task %d: scored %d new %s results across %d records",
+        task_id,
+        num_scored,
+        GENERATE_FILENAME,
+        len(shard_records),
+    )
 
 
 def _valid_manifest(run_dir: Path, task_id: int) -> dict:

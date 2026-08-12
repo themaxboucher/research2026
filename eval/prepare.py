@@ -3,16 +3,12 @@ import logging
 from pathlib import Path
 
 from eval.manifest import read_eval_manifest, write_eval_manifest
-from generate.constants import LOCATION_FILENAME, REGENERATE_FILENAME
+from generate.constants import GENERATE_FILENAME
 from storage.runs import resolve_dataset_and_run
 
 
 def _prepare(run_dir: Path, num_tasks: int | None) -> int:
-    has_output = any(
-        (run_dir / f"{filename}.jsonl").exists()
-        for filename in (LOCATION_FILENAME, REGENERATE_FILENAME)
-    )
-    if not has_output:
+    if not (run_dir / f"{GENERATE_FILENAME}.jsonl").exists():
         raise SystemExit(f"No generation output to score in {run_dir}")
 
     existing = read_eval_manifest(run_dir)
@@ -53,7 +49,7 @@ def _parse_args():
         "--num-tasks",
         type=int,
         default=None,
-        help="Total number of tasks in the scoring job array"
+        help="Total number of tasks in the scoring job array",
     )
     return parser.parse_args()
 

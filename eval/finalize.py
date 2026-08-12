@@ -13,7 +13,7 @@ from eval.constants import (
 from eval.manifest import read_eval_manifest
 from eval.normalize import normalize_comment
 from eval.scorer import CommentScorer
-from generate.constants import LOCATION_FILENAME
+from generate.constants import GENERATE_FILENAME
 from storage import load_from_jsonl, merge_jsonl_shards
 from storage.runs import resolve_dataset_and_run
 
@@ -101,16 +101,14 @@ def _merge_shards(run_dir: Path, filename: str, num_tasks: int | None) -> int:
 def _finalize(run_dir: Path) -> None:
     """Merge the per-task scored shards, then write the aggregate metrics."""
     num_tasks = read_eval_manifest(run_dir).get("num_tasks")
-    _merge_shards(run_dir, LOCATION_FILENAME, num_tasks)
+    _merge_shards(run_dir, GENERATE_FILENAME, num_tasks)
 
     scorer = CommentScorer()
 
-    if (run_dir / f"{LOCATION_FILENAME}_scored.jsonl").exists():
-        records = load_from_jsonl(run_dir, (LOCATION_FILENAME + "_scored"))
+    if (run_dir / f"{GENERATE_FILENAME}_scored.jsonl").exists():
+        records = load_from_jsonl(run_dir, (GENERATE_FILENAME + "_scored"))
         _write_location_metrics(records, run_dir, scorer)
         logging.info("Wrote location metrics for %s", run_dir.name)
-
-    # We don't have evaluation for the regeneration approach yet
 
 
 def _parse_args():

@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=generate-finalize
-#SBATCH --time=00:30:00
+#SBATCH --time=01:30:00
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=8G
+#SBATCH --mem=64G
 #SBATCH --output=logs/generate-finalize-%j.out
 
 set -euo pipefail

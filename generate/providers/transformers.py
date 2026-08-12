@@ -2,7 +2,9 @@ from functools import lru_cache
 
 from transformers import GenerationConfig, pipeline
 
-MAX_CACHED_MODELS = 4
+# Each job array task generates with exactly one model, so caching a second one
+# would only compete for GPU memory with the one actually in use.
+MAX_CACHED_MODELS = 1
 MAX_OUTPUT_TOKENS = 1024
 
 

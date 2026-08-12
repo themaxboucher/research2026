@@ -1,14 +1,16 @@
 #!/bin/bash
 #
 # Usage:
-#   ./submit.sh --num-tasks 8                Fresh generation across 8 tasks
+#   ./submit.sh --num-partitions 8           Fresh generation across 8 dataset
+#                                            partitions. The array runs one task
+#                                            per (model, partition) pair, so 8
+#                                            partitions and 4 models submit 32 tasks
 #   ./submit.sh --profile openrouter         Inference backend: transformers (local
 #                                            GPU) or openrouter (API) (default: transformers)
 #   ./submit.sh --dataset-dir <timestamp>    Generate for a specific dataset (default: latest)
 #   ./submit.sh --run-dir <timestamp>        Resume an existing generation (reuses its config)
 #   ./submit.sh --array 3,7                  Submit only these task indices (resume)
-#   ./submit.sh --approaches location        Approaches to run (default: location,regenerate)
-#   ./submit.sh --max-generate 100           Cap files sent to the LLMs
+#   ./submit.sh --max-generate 100           Cap records sent to the LLMs
 #   ./submit.sh --skip-setup                 Reuse the existing .venv; skip pip install
 
 set -euo pipefail
@@ -16,28 +18,26 @@ set -euo pipefail
 # Run everything from the repo root
 cd "$(dirname "$0")/../.."
 
-NUM_TASKS=""
+NUM_PARTITIONS=""
 PROFILE="transformers"
 DATASET_DIR=""
 RUN_DIR=""
 ARRAY_INDICES=""
-APPROACHES=""
 MAX_GENERATE=""
 SKIP_SETUP=""
 
 usage() {
-  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --num-tasks) NUM_TASKS="$2"; shift 2 ;;
+    --num-partitions) NUM_PARTITIONS="$2"; shift 2 ;;
     --profile) PROFILE="$2"; shift 2 ;;
     --dataset-dir) DATASET_DIR="$2"; shift 2 ;;
     --run-dir) RUN_DIR="$2"; shift 2 ;;
     --array) ARRAY_INDICES="$2"; shift 2 ;;
-    --approaches) APPROACHES="$2"; shift 2 ;;
     --max-generate) MAX_GENERATE="$2"; shift 2 ;;
     --skip-setup) SKIP_SETUP=1; shift ;;
     -h|--help) usage 0 ;;
@@ -91,9 +91,8 @@ fi
 PREP_ARGS=()
 [[ -n "$DATASET_DIR" ]] && PREP_ARGS+=(--dataset-dir "$DATASET_DIR")
 [[ -n "$RUN_DIR" ]] && PREP_ARGS+=(--run-dir "$RUN_DIR")
-[[ -n "$APPROACHES" ]] && PREP_ARGS+=(--approaches "$APPROACHES")
 [[ -n "$MAX_GENERATE" ]] && PREP_ARGS+=(--max-generate "$MAX_GENERATE")
-[[ -n "$NUM_TASKS" ]] && PREP_ARGS+=(--num-tasks "$NUM_TASKS")
+[[ -n "$NUM_PARTITIONS" ]] && PREP_ARGS+=(--num-partitions "$NUM_PARTITIONS")
 
 echo "+ python -m generate.prepare ${PREP_ARGS[*]}"
 PREP_OUT="$(python -m generate.prepare "${PREP_ARGS[@]}")"
@@ -101,20 +100,22 @@ PREP_OUT="$(python -m generate.prepare "${PREP_ARGS[@]}")"
 # Read the printed variables
 DATASET_DIR="$(grep '^DATASET_DIR=' <<<"$PREP_OUT" | cut -d= -f2-)"
 RUN_DIR="$(grep '^RUN_DIR=' <<<"$PREP_OUT" | cut -d= -f2-)"
-NUM_TASKS="$(grep '^NUM_TASKS=' <<<"$PREP_OUT" | cut -d= -f2-)"
+NUM_PARTITIONS="$(grep '^NUM_PARTITIONS=' <<<"$PREP_OUT" | cut -d= -f2-)"
+ARRAY_SIZE="$(grep '^ARRAY_SIZE=' <<<"$PREP_OUT" | cut -d= -f2-)"
 
-if [[ -z "$DATASET_DIR" || -z "$RUN_DIR" || -z "$NUM_TASKS" ]]; then
-  echo "Prep did not return DATASET_DIR/RUN_DIR/NUM_TASKS:" >&2
+if [[ -z "$DATASET_DIR" || -z "$RUN_DIR" || -z "$NUM_PARTITIONS" || -z "$ARRAY_SIZE" ]]; then
+  echo "Prep did not return DATASET_DIR/RUN_DIR/NUM_PARTITIONS/ARRAY_SIZE:" >&2
   echo "$PREP_OUT" >&2
   exit 1
 fi
 
 echo "Dataset dir: $DATASET_DIR"
 echo "Run dir:     $RUN_DIR"
-echo "Num tasks:   $NUM_TASKS"
+echo "Partitions:  $NUM_PARTITIONS"
+echo "Array size:  $ARRAY_SIZE (one task per model per partition)"
 
 # Phase 2: Submit the jobs array
-ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}"
+ARRAY_SPEC="${ARRAY_INDICES:-0-$((ARRAY_SIZE - 1))}"
 
 ARRAY_JOB_ID=$(sbatch --parsable \
   --array="$ARRAY_SPEC" \
@@ -122,7 +123,7 @@ ARRAY_JOB_ID=$(sbatch --parsable \
   "$JOB_SCRIPT")
 echo "Submitted array job $ARRAY_JOB_ID (--array=$ARRAY_SPEC, --profile=$PROFILE)"
 
-# Phase 3: Merge the per-task shards once every task succeeds
+# Phase 3: Merge the shards once every task succeeds
 FINALIZE_JOB_ID=$(sbatch --parsable \
   --dependency=afterok:"$ARRAY_JOB_ID" \
   --export=ALL,DATASET_DIR="$DATASET_DIR",RUN_DIR="$RUN_DIR" \
