@@ -104,6 +104,7 @@ def _mine_repo(
                 {
                     "repo_name": repo_full_name,
                     "commit_hash": commit.hash,
+                    "commit_datetime": commit.committer_date.isoformat(),
                     "commit_message": commit.msg,
                     "filename": file.filename,
                     "new_path": file.new_path,
@@ -114,9 +115,6 @@ def _mine_repo(
                     "deleted_lines": file.deleted_lines,
                     "source_code": file.source_code,
                     "previous_source_code": file.source_code_before,
-                    "nloc": file.nloc,
-                    "complexity": file.complexity,
-                    "token_count": file.token_count,
                 }
             )
 
