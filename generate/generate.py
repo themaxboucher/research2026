@@ -4,15 +4,13 @@ import logging
 from pathlib import Path
 from typing import Callable
 
-from collect.filter_rules import target_comments
+from collect.filter_rules import get_target_comments
 from generate.constants import (
     GENERATE_FILENAME,
     PROGRESS_FILENAME,
     SOURCE_FILENAME,
 )
 from generate.model_output import strip_output_wrappers
-from generate.parse_code import prompt_code
-from generate.prompt import build_location_prompt
 from generate.providers.models import get_model_profile
 from storage import (
     append_to_jsonl,
@@ -94,17 +92,11 @@ def _generate_for_comment(
     model_name: str,
     get_completion: Callable[[str, str], str],
 ) -> dict:
-    source_code = dataset_record["source_code"]
-    filepath = dataset_record["new_path"]
+    prompt = comment_data.get("prompt")
+    if prompt is None:
+        raise ValueError("Comment data must include a prompt")
 
-    code = prompt_code(source_code, comment_data)
-    prompt = build_location_prompt(
-        dataset_record["repo_name"],
-        filepath,
-        comment_data,
-        commit_message=dataset_record["commit_message"],
-        code=code,
-    )
+    filepath = dataset_record["new_path"]
 
     results = _generate_with_llm(prompt, filepath, model_name, get_completion)
     return {
@@ -114,6 +106,7 @@ def _generate_for_comment(
         "end_line": comment_data["end_line"],
         "anchor": comment_data.get("anchor"),
         "comment": comment_data.get("comment"),
+        "prompt_code": comment_data.get("prompt_code"),
         "prompt": prompt,
         "results": results,
     }
@@ -123,7 +116,7 @@ def _generate_for_record(
     dataset_record: dict, model_name: str, get_completion: Callable[[str, str], str]
 ) -> dict:
     comment_generations = []
-    for comment_data in target_comments(dataset_record):
+    for comment_data in dataset_record.get("target_comments", []):
         try:
             comment_generations.append(
                 _generate_for_comment(

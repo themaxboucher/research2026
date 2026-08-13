@@ -9,7 +9,7 @@ def _code_type_instruction(comment_data: dict) -> str:
     return "Output one or more comment lines, each beginning with `#`"
 
 
-def build_location_prompt(
+def build_prompt(
     repo_name: str,
     filepath: str,
     comment_data: dict,

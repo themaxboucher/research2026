@@ -146,14 +146,14 @@ def is_ai_authored_file(source_file: dict) -> bool:
     return False
 
 
-def target_comments(source_file: dict) -> list[dict]:
+def get_target_comments(comments: list[dict]) -> list[dict]:
     TARGET_COMMENT_TYPES = {"inline", "block"}
     TARGET_COMMENT_STATUSES = {"added"}
     # `None` means the comment's intent was never labeled; it gets the generic instruction
     TARGET_INTENTS = {"what", "why", "how", None}
     return [
         comment
-        for comment in (source_file.get("comments") or [])
+        for comment in comments
         if comment.get("type") in TARGET_COMMENT_TYPES
         and comment.get("status") in TARGET_COMMENT_STATUSES
         and comment.get("comment") is not None

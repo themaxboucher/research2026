@@ -63,6 +63,7 @@ def local_scope_bounds(
     return None
 
 
+# TODO: This function needs to be fixed
 def _window_around(anchor_line: int, line_count: int) -> tuple[int, int]:
     window_length = min(MAX_SCOPE_LINE_COUNT, line_count)
     start = anchor_line - window_length // 2
@@ -84,14 +85,7 @@ def _scope_bounds(source_code: str, source_lines: list[str], anchor_line: int) -
     return _window_around(anchor_line, len(source_lines))
 
 
-def prompt_code(source_code: str, comment_data: dict) -> str:
-    """Return the source of the local scope enclosing the target comment, with
-    the target comment itself replaced by a placeholder.
-
-    Raises when the placeholder cannot be placed: the prompt tells the model to
-    replace it, so scope code without one would silently produce a prediction
-    for no particular location."""
-
+def get_prompt_code(source_code: str, comment_data: dict) -> str:
     PLACEHOLDER_COMMENT = "Add the comment here"
 
     source_lines = source_code.splitlines()

@@ -7,34 +7,36 @@ from tqdm.auto import tqdm
 from collect.comments import get_comments_from_file
 from collect.constants import DATASET_FILENAME, RAW_DATASET_FILENAME
 from collect.filter_rules import (
+    get_target_comments,
     has_eligible_metadata,
     is_ai_authored_file,
-    target_comments,
 )
+from collect.parse_code import get_prompt_code
+from collect.prompt import build_prompt
 from storage import append_to_jsonl, iter_from_jsonl, save_to_jsonl
 from storage.datasets import resolve_dataset_directory, write_manifest
 
 WRITE_BATCH_SIZE = 1000
 
 
-def _add_parsed_comments(file_data):
-    file_data["comments"] = []
-    source_code = file_data.get("source_code")
-    previous_source_code = file_data.get("previous_source_code")
+def _add_prompt_code_and_prompt(record: dict, target_comments: list[dict]) -> dict:
+    source_code = record.get("source_code")
+    if source_code is None:
+        raise ValueError("source_code must be present in the record")
 
-    if source_code is None or previous_source_code is None:
-        raise ValueError("Both source_code and previous_source_code must be present")
+    for target_comment in target_comments:
+        prompt_code = get_prompt_code(source_code, target_comment)
+        target_comment["prompt_code"] = prompt_code
+        target_comment["prompt"] = build_prompt(
+            record["repo_name"],
+            record["new_path"],
+            target_comment,
+            record["commit_message"],
+            prompt_code,
+        )
 
-    try:
-        file_data["comments"] = get_comments_from_file(
-            source_code, previous_source_code
-        )
-    except Exception as e:
-        logging.warning(
-            "Failed to parse comments for %s: %s", file_data.get("new_path"), e
-        )
-        file_data["error"] = str(e)
-    return file_data
+    record["target_comments"] = target_comments
+    return record
 
 
 def _filter_dataset(dataset_directory: Path) -> None:
@@ -44,8 +46,9 @@ def _filter_dataset(dataset_directory: Path) -> None:
         "raw_num_files": 0,
         "num_files_wrong_metadata": 0,
         "num_files_ai_authored": 0,
-        "num_files_parse_errors": 0,
+        "num_files_comment_parse_error": 0,
         "num_files_no_target_comments": 0,
+        "num_files_prompt_code_error": 0,
         "num_repos": 0,
         "num_commits": 0,
         "num_files": 0,
@@ -84,19 +87,35 @@ def _filter_dataset(dataset_directory: Path) -> None:
             manifest["num_files_ai_authored"] += 1
             continue
 
-        record = _add_parsed_comments(record)
-        manifest["num_comments"] += len(record["comments"])
-
-        if "error" in record and record.get("error") is not None:
-            manifest["num_files_parse_errors"] += 1
+        try:
+            comments = get_comments_from_file(
+                record["source_code"], record["previous_source_code"]
+            )
+            manifest["num_comments"] += len(comments)
+        except Exception as e:
+            logging.warning(
+                "Failed to parse comments for %s: %s", record.get("new_path"), e
+            )
+            manifest["num_files_comment_parse_error"] += 1
             continue
 
-        targets = target_comments(record)
-        if not targets:
+        target_comments = get_target_comments(comments)
+        if not target_comments:
             manifest["num_files_no_target_comments"] += 1
             continue
 
-        manifest["num_target_comments"] += len(targets)
+        try:
+            record = _add_prompt_code_and_prompt(record, target_comments)
+        except Exception as e:
+            logging.warning(
+                "Failed to add prompt code and prompt for %s: %s",
+                record.get("new_path"),
+                e,
+            )
+            manifest["num_files_prompt_code_error"] += 1
+            continue
+
+        manifest["num_target_comments"] += len(target_comments)
         manifest["num_files"] += 1
 
         if repo_key not in counted_repos:
