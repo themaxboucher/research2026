@@ -140,8 +140,10 @@ def _value_to_md(value, level: int, label: str) -> str:
     return _scalar_value_to_md(value)
 
 
-def _dict_to_md(filename: str, data: list[dict]) -> str:
+def _dict_to_md(filename: str, data: list[dict], is_truncated: bool) -> str:
     md = f"# {filename}\n\n"
+    if is_truncated:
+        md += f"Showing the first {len(data)} records of the file.\n\n"
     for index, record in enumerate(data, start=1):
         md += "---\n\n"
         md += _heading(2, f"Record {index}")
@@ -149,9 +151,14 @@ def _dict_to_md(filename: str, data: list[dict]) -> str:
     return md
 
 
-def _read_jsonl_file(jsonl_file_path: Path) -> list[dict]:
+def _read_jsonl_file(jsonl_file_path: Path, max_records: int | None) -> list[dict]:
+    records = []
     with open(jsonl_file_path, "r") as f:
-        return [json.loads(line) for line in f]
+        for line in f:
+            if max_records is not None and len(records) >= max_records:
+                break
+            records.append(json.loads(line))
+    return records
 
 
 def _write_md_file(md_file_path: Path, md: str) -> None:
@@ -162,11 +169,20 @@ def _write_md_file(md_file_path: Path, md: str) -> None:
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", type=str, help="The JSONL file to convert to MD.")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Convert only the first LIMIT lines of the JSONL file. Defaults to every line.",
+    )
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
+
+    if args.limit is not None and args.limit < 1:
+        raise ValueError(f"The limit {args.limit} must be at least 1.")
 
     jsonl_file_path = Path(args.file)
     if not jsonl_file_path.exists():
@@ -176,9 +192,10 @@ def main():
     if not jsonl_file_path.suffix == ".jsonl":
         raise ValueError(f"The JSONL file {jsonl_file_path} is not a JSONL file.")
 
-    data = _read_jsonl_file(jsonl_file_path)
+    data = _read_jsonl_file(jsonl_file_path, args.limit)
 
-    md = _dict_to_md(jsonl_file_path.name, data)
+    is_truncated = args.limit is not None and len(data) == args.limit
+    md = _dict_to_md(jsonl_file_path.name, data, is_truncated)
 
     md_file_path = jsonl_file_path.with_suffix(".md")
     if md_file_path.exists():
