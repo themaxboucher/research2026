@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from typing import Callable
 
-from collect.filter_rules import get_target_comments
 from generate.constants import (
     GENERATE_FILENAME,
     PROGRESS_FILENAME,
