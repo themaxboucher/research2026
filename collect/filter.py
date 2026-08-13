@@ -11,8 +11,8 @@ from collect.filter_rules import (
     has_eligible_metadata,
     is_ai_authored_file,
 )
-from collect.parse_code import get_prompt_code
 from collect.prompt import build_prompt
+from collect.prompt_code import get_prompt_code
 from storage import append_to_jsonl, iter_from_jsonl, save_to_jsonl
 from storage.datasets import resolve_dataset_directory, write_manifest
 
