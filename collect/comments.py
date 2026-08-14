@@ -2,44 +2,6 @@ import io
 import tokenize
 
 
-def _next_code_line(source_lines: list[str], after_line_no: int) -> str | None:
-    for line_index in range(after_line_no, len(source_lines)):
-        stripped_line = source_lines[line_index].strip()
-        if not stripped_line or stripped_line.startswith("#"):
-            continue
-        return stripped_line
-    return None
-
-
-def _annotate_comments(
-    new_comments: list[dict], old_comments: list[dict]
-) -> list[dict]:
-    if not old_comments:
-        return [{**comment, "status": "added"} for comment in new_comments]
-
-    if not new_comments:
-        return [{**comment, "status": "removed"} for comment in old_comments]
-
-    matched_old_comment_indices: set[int] = set()
-    annotated_comments: list[dict] = []
-
-    for new_comment in new_comments:
-        status, matched_old_index = _find_status_for_new_comment(
-            new_comment, old_comments, matched_old_comment_indices
-        )
-        if matched_old_index is not None:
-            matched_old_comment_indices.add(matched_old_index)
-        annotated_comments.append({**new_comment, "status": status})
-
-    for old_index, old_comment in enumerate(old_comments):
-        if old_index in matched_old_comment_indices:
-            continue
-        annotated_comments.append({**old_comment, "status": "removed"})
-
-    annotated_comments.sort(key=lambda comment: comment["start_line"])
-    return annotated_comments
-
-
 def _is_same_comment(first_comment: dict, second_comment: dict) -> bool:
     return first_comment.get("comment") == second_comment.get("comment")
 
@@ -75,9 +37,49 @@ def _find_status_for_new_comment(
     return "added", None
 
 
-def extract_comments(file_content: str) -> list[dict]:
-    tokens = list(tokenize.tokenize(io.BytesIO(file_content.encode("utf-8")).readline))
-    source_lines = file_content.splitlines(keepends=True)
+def _annotated_comments(
+    new_comments: list[dict], old_comments: list[dict]
+) -> list[dict]:
+    if not old_comments:
+        return [{**comment, "status": "added"} for comment in new_comments]
+
+    if not new_comments:
+        return [{**comment, "status": "removed"} for comment in old_comments]
+
+    matched_old_comment_indices: set[int] = set()
+    annotated_comments: list[dict] = []
+
+    for new_comment in new_comments:
+        status, matched_old_index = _find_status_for_new_comment(
+            new_comment, old_comments, matched_old_comment_indices
+        )
+        if matched_old_index is not None:
+            matched_old_comment_indices.add(matched_old_index)
+        annotated_comments.append({**new_comment, "status": status})
+
+    for old_index, old_comment in enumerate(old_comments):
+        if old_index in matched_old_comment_indices:
+            continue
+        annotated_comments.append({**old_comment, "status": "removed"})
+
+    annotated_comments.sort(key=lambda comment: comment["start_line"])
+    return annotated_comments
+
+
+def _next_code_line(source_lines: list[str], after_line_no: int) -> str | None:
+    for line_index in range(after_line_no, len(source_lines)):
+        stripped_line = source_lines[line_index].strip()
+        line_is_empty = not stripped_line
+        line_is_comment = stripped_line.startswith("#")
+        if line_is_empty or line_is_comment:
+            continue
+        return stripped_line
+    return None
+
+
+def _get_comments_from_code(source_code: str) -> list[dict]:
+    tokens = list(tokenize.tokenize(io.BytesIO(source_code.encode("utf-8")).readline))
+    source_lines = source_code.splitlines(keepends=True)
     raw_comment_tokens: list[tuple[int, str, bool, str | None]] = []
 
     for tok in tokens:
@@ -85,7 +87,8 @@ def extract_comments(file_content: str) -> list[dict]:
             continue
         row, col = tok.start
         row_idx = row - 1
-        if row_idx < 0 or row_idx >= len(source_lines):
+        invalid_row_idx = row_idx < 0 or row_idx >= len(source_lines)
+        if invalid_row_idx:
             continue
         prefix = source_lines[row_idx][:col]
         is_standalone = prefix.strip() == ""
@@ -124,7 +127,7 @@ def extract_comments(file_content: str) -> list[dict]:
                 }
             )
 
-    plain_source_lines = file_content.splitlines()
+    plain_source_lines = source_code.splitlines()
     for entry in comment_entries:
         if entry["type"] == "block":
             entry["anchor"] = _next_code_line(plain_source_lines, entry["end_line"])
@@ -132,7 +135,9 @@ def extract_comments(file_content: str) -> list[dict]:
     return comment_entries
 
 
-def get_comments_from_file(file_content: str, previous_file_content: str) -> list[dict]:
-    new_comments = extract_comments(file_content)
-    old_comments = extract_comments(previous_file_content)
-    return _annotate_comments(new_comments, old_comments)
+def get_comments_from_change(
+    file_content: str, previous_file_content: str
+) -> list[dict]:
+    new_comments = _get_comments_from_code(file_content)
+    old_comments = _get_comments_from_code(previous_file_content)
+    return _annotated_comments(new_comments, old_comments)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from tqdm.auto import tqdm
 
-from collect.comments import get_comments_from_file
+from collect.comments import get_comments_from_change
 from collect.constants import DATASET_FILENAME, RAW_DATASET_FILENAME
 from collect.filter_rules import (
     get_target_comments,
@@ -88,7 +88,7 @@ def _filter_dataset(dataset_directory: Path) -> None:
             continue
 
         try:
-            comments = get_comments_from_file(
+            comments = get_comments_from_change(
                 record["source_code"], record["previous_source_code"]
             )
             manifest["num_comments"] += len(comments)
