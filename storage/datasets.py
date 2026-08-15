@@ -74,9 +74,11 @@ def resolve_dataset_directory(
     return dataset_directory
 
 
-def write_manifest(dataset_dir: Path, manifest: dict) -> dict:
+def write_manifest(
+    dataset_dir: Path, manifest: dict, filename: str = MANIFEST_FILENAME
+) -> dict:
     dataset_dir.mkdir(parents=True, exist_ok=True)
-    (dataset_dir / (MANIFEST_FILENAME + ".json")).write_text(
+    (dataset_dir / (filename + ".json")).write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
     return manifest
