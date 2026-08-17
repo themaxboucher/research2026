@@ -8,6 +8,7 @@ from eval.constants import (
     BERTSCORE_CHUNK_SIZE,
     BERTSCORE_MAX_LENGTH,
     BERTSCORE_MODEL,
+    BLEU_MAX_ORDER,
 )
 
 
@@ -36,12 +37,16 @@ class CommentScorer:
         if self._bleu is None:
             self._bleu = evaluate.load("bleu", keep_in_memory=True)
 
-    def corpus_bleu(self, predictions: list[str], references: list[str]) -> float:
-        """Standard (unsmoothed) corpus-level BLEU-4 over all pairs at once."""
+    def corpus_bleu(
+        self, predictions: list[str], references: list[str]
+    ) -> dict[str, float]:
         self._load_bleu()
-        return self._bleu.compute(
-            predictions=predictions, references=references, max_order=4
-        )["bleu"]
+        return {
+            f"bleu{order}_corpus": self._bleu.compute(
+                predictions=predictions, references=references, max_order=order
+            )["bleu"]
+            for order in range(1, BLEU_MAX_ORDER + 1)
+        }
 
     def score_pairs(
         self,
@@ -59,13 +64,13 @@ class CommentScorer:
                 pred_chunk = predictions[start : start + BERTSCORE_CHUNK_SIZE]
                 ref_chunk = references[start : start + BERTSCORE_CHUNK_SIZE]
 
-                # We use per comment pair BLEU 4 here (not corpus-level).
-                # Smoothing is needed, otherwise any pair without a matching
-                # 4-gram scores 0.
                 bleu_scores = [
-                    self._bleu.compute(
-                        predictions=[pred], references=[ref], max_order=4, smooth=True
-                    )["bleu"]
+                    {
+                        f"bleu{order}": self._bleu.compute(
+                            predictions=[pred], references=[ref], max_order=order
+                        )["bleu"]
+                        for order in range(1, BLEU_MAX_ORDER + 1)
+                    }
                     for pred, ref in zip(pred_chunk, ref_chunk)
                 ]
                 rouge_scores = self._rouge.compute(
@@ -82,7 +87,7 @@ class CommentScorer:
                 )[2].tolist()
 
                 scores.extend(
-                    {"bleu4": bleu, "rougeL": rouge, "bertscore_f1": bert}
+                    {**bleu, "rougeL": rouge, "bertscore_f1": bert}
                     for bleu, rouge, bert in zip(
                         bleu_scores, rouge_scores, bertscore_f1
                     )

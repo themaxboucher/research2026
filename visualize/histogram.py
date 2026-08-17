@@ -9,13 +9,18 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-from eval.constants import BASELINE_MODELS, SCORE_METRICS, UNKNOWN_MODEL
+from eval.constants import (
+    BASELINE_MODELS,
+    BLEU_METRICS,
+    SCORE_METRICS,
+    UNKNOWN_MODEL,
+)
 from generate.constants import GENERATE_FILENAME
 from storage import load_from_jsonl
 from storage.runs import resolve_dataset_and_run
 
 METRIC_LABELS = {
-    "bleu4": "BLEU-4",
+    **{metric: f"BLEU-{metric.removeprefix('bleu')}" for metric in BLEU_METRICS},
     "rougeL": "ROUGE-L",
     "bertscore_f1": "BERTScore F1",
 }
@@ -28,7 +33,10 @@ BASELINE_WIDTH = 1.2
 BASELINE_STYLE = ":"
 LEGEND_MAX_COLUMNS = 3
 LEGEND_ROW_HEIGHT = 0.07
-FIGURE_SIZE = (15, 5)
+# One panel per score metric, so the figure widens with the metric count rather
+# than squeezing every added BLEU order into a fixed width.
+PANEL_WIDTH = 5
+FIGURE_SIZE = (PANEL_WIDTH * len(SCORE_METRICS), 5)
 FIGURE_DPI = 150
 PALETTE = "tab10"
 

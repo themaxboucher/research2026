@@ -9,13 +9,13 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-from eval.constants import SCORE_METRICS, UNKNOWN_MODEL
+from eval.constants import BLEU_METRICS, SCORE_METRICS, UNKNOWN_MODEL
 from generate.constants import GENERATE_FILENAME
 from storage import iter_from_jsonl
 from storage.runs import resolve_dataset_and_run
 
 SCORE_LABELS = {
-    "bleu4": "BLEU-4",
+    **{metric: f"BLEU-{metric.removeprefix('bleu')}" for metric in BLEU_METRICS},
     "rougeL": "ROUGE-L",
     "bertscore_f1": "BERTScore F1",
 }
@@ -30,7 +30,14 @@ POINT_SIZE = 10
 POINT_ALPHA = 0.3
 LEGEND_MAX_COLUMNS = 3
 LEGEND_ROW_HEIGHT = 0.05
-FIGURE_SIZE = (15, 9)
+# The grid is one column per score metric and one row per complexity metric, so
+# the figure grows with both rather than squeezing the added BLEU orders.
+PANEL_WIDTH = 5
+PANEL_HEIGHT = 4.5
+FIGURE_SIZE = (
+    PANEL_WIDTH * len(SCORE_METRICS),
+    PANEL_HEIGHT * len(COMPLEXITY_METRICS),
+)
 FIGURE_DPI = 150
 PALETTE = "tab10"
 

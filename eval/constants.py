@@ -1,6 +1,9 @@
 LOCATION_METRICS_FILENAME = "location_metrics"
 
-SCORE_METRICS = ("bleu4", "rougeL", "bertscore_f1")
+BLEU_MAX_ORDER = 4
+BLEU_METRICS = tuple(f"bleu{order}" for order in range(1, BLEU_MAX_ORDER + 1))
+
+SCORE_METRICS = BLEU_METRICS + ("rougeL", "bertscore_f1")
 
 BERTSCORE_MODEL = "microsoft/deberta-xlarge-mnli"
 

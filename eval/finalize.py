@@ -25,7 +25,7 @@ def _summarize_scores(
     references = [reference for _, reference, _ in scored]
     summary = {
         "count": len(scored),
-        "bleu4_corpus": scorer.corpus_bleu(predictions, references),
+        **scorer.corpus_bleu(predictions, references),
     }
     for metric in SCORE_METRICS:
         values = [scores[metric] for _, _, scores in scored]
