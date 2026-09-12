@@ -10,7 +10,7 @@ MAX_OUTPUT_TOKENS = 1024
 
 @lru_cache(maxsize=MAX_CACHED_MODELS)
 def _load_text_generation_pipeline(model_name: str):
-    return pipeline("text-generation", model=model_name, device_map="auto")
+    return pipeline("text-generation", model=model_name, device_map="cpu")
 
 
 def get_completion(model_name: str, prompt: str) -> str:
