@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=generate-comments
-#SBATCH --time=24:00:00
-#SBATCH --cpus-per-task=32
+#SBATCH --time=03:00:00
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
+#SBATCH --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1
 #SBATCH --output=logs/generate-comments-%A_%a.out
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
 set -euo pipefail
 
