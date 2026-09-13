@@ -69,14 +69,12 @@ def _regrouped_generation_records(run_dir: Path, shard_paths: list[Path]) -> lis
 
 
 def _finalize(run_dir: Path) -> None:
-    # Regrouping holds the merged records in memory, so it reads the shards
-    # before anything is deleted and writes the result in one go.
+    # Shards are kept after merging so a later finalize can rebuild the
+    # merged file from every shard once more generations have finished.
     generation_shards = sorted(run_dir.glob(f"{GENERATE_FILENAME}.*.jsonl"))
     if generation_shards:
         generation_records = _regrouped_generation_records(run_dir, generation_shards)
         save_to_jsonl(generation_records, run_dir, GENERATE_FILENAME)
-        for shard_path in generation_shards:
-            shard_path.unlink()
         logging.info(
             "Merged %d %s shards into %d records",
             len(generation_shards),
@@ -87,7 +85,7 @@ def _finalize(run_dir: Path) -> None:
     # Progress stays one row per (model, dataset record). It is the resume
     # ledger, so it is concatenated rather than regrouped.
     if any(run_dir.glob(f"{PROGRESS_FILENAME}.*.jsonl")):
-        shard_count = merge_jsonl_shards(run_dir, PROGRESS_FILENAME, delete_shards=True)
+        shard_count = merge_jsonl_shards(run_dir, PROGRESS_FILENAME, delete_shards=False)
         logging.info("Merged %d %s shards", shard_count, PROGRESS_FILENAME)
 
     # Progress is recorded per (model, dataset record), so these count
