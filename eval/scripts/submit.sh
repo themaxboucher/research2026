@@ -7,6 +7,7 @@
 #   ./submit.sh --num-tasks 16              Width of the scoring job array
 #   ./submit.sh --array 3,7                 Submit only these task indices (resume)
 #   ./submit.sh --skip-setup                Reuse the existing .venv; skip pip install
+#   ./submit.sh --force                     Rescore results that were already scored
 
 set -euo pipefail
 
@@ -18,9 +19,10 @@ RUN_DIR=""
 NUM_TASKS=""
 ARRAY_INDICES=""
 SKIP_SETUP=""
+FORCE=""
 
 usage() {
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -31,6 +33,7 @@ while [[ $# -gt 0 ]]; do
     --num-tasks) NUM_TASKS="$2"; shift 2 ;;
     --array) ARRAY_INDICES="$2"; shift 2 ;;
     --skip-setup) SKIP_SETUP=1; shift ;;
+    --force) FORCE=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 1 ;;
   esac
@@ -100,7 +103,7 @@ ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}"
 
 ARRAY_JOB_ID=$(sbatch --parsable \
   --array="$ARRAY_SPEC" \
-  --export=ALL,DATASET_DIR="$DATASET_DIR",RUN_DIR="$RUN_DIR" \
+  --export=ALL,DATASET_DIR="$DATASET_DIR",RUN_DIR="$RUN_DIR",FORCE="$FORCE" \
   eval/scripts/job.sh)
 echo "Submitted scoring array $ARRAY_JOB_ID (--array=$ARRAY_SPEC)"
 

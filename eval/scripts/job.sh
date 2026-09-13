@@ -25,4 +25,5 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 python -m eval.eval \
   --dataset-dir "${DATASET_DIR}" \
   --run-dir "${RUN_DIR}" \
-  --task-id "${SLURM_ARRAY_TASK_ID}"
+  --task-id "${SLURM_ARRAY_TASK_ID}" \
+  ${FORCE:+--force}
