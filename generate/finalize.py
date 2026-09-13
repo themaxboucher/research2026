@@ -6,13 +6,9 @@ from generate.constants import (
     GENERATE_FILENAME,
     PROGRESS_FILENAME,
 )
+from generate.shards import dataset_record_key, repair_interrupted_shard
 from storage.jsonl import iter_from_jsonl, merge_jsonl_shards, save_to_jsonl
 from storage.runs import resolve_dataset_and_run
-
-
-def _record_key(record: dict) -> tuple[str | None, str | None, str | None]:
-    # Must stay in step with the key generate.py partitions and resumes on.
-    return (record.get("repo_name"), record.get("new_path"), record.get("commit_hash"))
 
 
 def _comment_key(comment_generation: dict) -> tuple[str | None, int | None, int | None]:
@@ -33,7 +29,7 @@ def _regrouped_generation_records(run_dir: Path, shard_paths: list[Path]) -> lis
     # `results` come out in the same model order.
     for shard_path in shard_paths:
         for record in iter_from_jsonl(run_dir, shard_path.stem):
-            record_key = _record_key(record)
+            record_key = dataset_record_key(record)
             regrouped_record = regrouped.get(record_key)
             if regrouped_record is None:
                 regrouped_record = {
@@ -72,6 +68,15 @@ def _finalize(run_dir: Path) -> None:
     # Shards are kept after merging so a later finalize can rebuild the
     # merged file from every shard once more generations have finished.
     generation_shards = sorted(run_dir.glob(f"{GENERATE_FILENAME}.*.jsonl"))
+
+    # A task killed mid-write (e.g. at its time limit) can leave a broken line
+    # or an uncommitted record. Both merges below read the shards, so repair
+    # them first, exactly as the task itself would on resume. Every task
+    # creates its output shard before its progress shard, so this covers both.
+    for shard_path in generation_shards:
+        suffix = shard_path.stem.removeprefix(f"{GENERATE_FILENAME}.")
+        repair_interrupted_shard(run_dir, suffix)
+
     if generation_shards:
         generation_records = _regrouped_generation_records(run_dir, generation_shards)
         save_to_jsonl(generation_records, run_dir, GENERATE_FILENAME)

@@ -11,34 +11,19 @@ from generate.constants import (
 )
 from generate.model_output import strip_output_wrappers
 from generate.providers.models import get_model_profile
+from generate.shards import dataset_record_key, repair_interrupted_shard
 from storage import (
     append_to_jsonl,
-    drop_trailing_records,
     iter_from_jsonl,
     save_to_jsonl,
     shard_filename,
     shard_suffix,
-    truncate_broken_tail,
 )
 from storage.runs import (
     MANIFEST_FILENAME,
     read_manifest,
     resolve_dataset_and_run,
 )
-
-
-def _record_key(record: dict) -> tuple[str | None, str | None, str | None]:
-    return (record.get("repo_name"), record.get("new_path"), record.get("commit_hash"))
-
-
-def _completed_record_keys(
-    run_dir: Path, progress_filename: str
-) -> set[tuple[str | None, str | None, str | None]]:
-    if not (run_dir / f"{progress_filename}.jsonl").exists():
-        return set()
-    return {
-        _record_key(record) for record in iter_from_jsonl(run_dir, progress_filename)
-    }
 
 
 def _task_assignment(
@@ -167,15 +152,7 @@ def _generate(
     )
 
     # Resume an interrupted run rather than overwriting it
-    truncate_broken_tail(run_dir, progress_filename)
-    completed_keys = _completed_record_keys(run_dir, progress_filename)
-
-    truncate_broken_tail(run_dir, output_filename)
-    drop_trailing_records(
-        run_dir,
-        output_filename,
-        lambda record: _record_key(record) not in completed_keys,
-    )
+    completed_keys = repair_interrupted_shard(run_dir, suffix)
     if completed_keys:
         logging.info(
             "Resuming run %r at %s (%d records already done for %s).",
@@ -205,7 +182,7 @@ def _generate(
     dataset_records = (
         dataset_record
         for dataset_record in dataset_records
-        if _record_key(dataset_record) not in completed_keys
+        if dataset_record_key(dataset_record) not in completed_keys
     )
 
     # Count records already done so progress logging reflects the whole task.
