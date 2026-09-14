@@ -1,0 +1,18 @@
+#!/bin/bash
+#SBATCH --job-name=histogram
+#SBATCH --time=01:00:00
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=256G
+#SBATCH --output=logs/histogram-%j.out
+
+set -euo pipefail
+
+# Submit from the repository root after running: mkdir -p logs
+# Optional arguments are forwarded to visualize.histogram.
+cd "${SLURM_SUBMIT_DIR}"
+
+module load python/3.13
+source .venv/bin/activate
+
+# The current histogram implementation loads the entire scored file into RAM.
+python -m visualize.histogram "$@"

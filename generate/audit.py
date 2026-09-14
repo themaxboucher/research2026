@@ -5,9 +5,10 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from generate.constants import GENERATE_FILENAME
-from storage.jsonl import iter_from_jsonl
-from storage.runs import resolve_dataset_and_run
+from generate.constants import GENERATE_FILENAME, PROGRESS_FILENAME, SOURCE_FILENAME
+from generate.shards import dataset_record_key
+from storage.jsonl import iter_from_jsonl, shard_filename, shard_suffix
+from storage.runs import read_manifest, resolve_dataset_and_run
 
 MAX_REASON_LENGTH = 80
 MISSING_ERROR_REASON = "No comment returned and no error recorded"
@@ -39,6 +40,19 @@ def failure_reason(result: dict) -> str:
 
 def is_failed_completion(result: dict) -> bool:
     return result.get("error") is not None or result.get("comment_text") is None
+
+
+def comment_generation_succeeded(comment_generation: dict) -> bool:
+    results = comment_generation.get("results") or []
+    return bool(results) and not any(is_failed_completion(result) for result in results)
+
+
+def _record_has_failed_generation(record: dict) -> bool:
+    comment_generations = record.get("comment_generations") or []
+    return not all(
+        comment_generation_succeeded(comment_generation)
+        for comment_generation in comment_generations
+    )
 
 
 @dataclass
@@ -116,6 +130,81 @@ def print_failure_report(run_directory: Path, tally: CompletionFailureTally) -> 
     print("\n".join(_failure_report_lines(run_directory, tally)))
 
 
+def _eligible_record_count(dataset_directory: Path, max_generate: int | None) -> int:
+    source_path = dataset_directory / f"{SOURCE_FILENAME}.jsonl"
+    with source_path.open("r", encoding="utf-8") as source_file:
+        record_count = sum(1 for line in source_file if line.strip())
+    if max_generate is None:
+        return record_count
+    return min(record_count, max_generate)
+
+
+def _task_needs_generation(
+    run_directory: Path, task_id: int, array_size: int, partition_record_count: int
+) -> bool:
+    suffix = shard_suffix(task_id, array_size)
+    progress_filename = shard_filename(PROGRESS_FILENAME, suffix)
+    if not (run_directory / f"{progress_filename}.jsonl").exists():
+        return True
+
+    committed_keys = {
+        dataset_record_key(progress_row)
+        for progress_row in iter_from_jsonl(run_directory, progress_filename)
+    }
+    if len(committed_keys) < partition_record_count:
+        return True
+
+    output_filename = shard_filename(GENERATE_FILENAME, suffix)
+    return any(
+        _record_has_failed_generation(record)
+        for record in iter_from_jsonl(run_directory, output_filename)
+    )
+
+
+def task_ids_needing_generation(
+    dataset_directory: Path, run_directory: Path
+) -> list[int]:
+    """Return the array tasks that have unfinished records or a failed comment
+    generation: the tasks a --retry-failed resubmission has to run."""
+    manifest = read_manifest(run_directory)
+    if not manifest:
+        raise SystemExit(f"No run manifest in {run_directory}.")
+
+    config = manifest.get("config") or {}
+    num_partitions = config["num_partitions"]
+    array_size = num_partitions * len(manifest["model_names"])
+    eligible_record_count = _eligible_record_count(
+        dataset_directory, config.get("max_generate")
+    )
+
+    task_ids = []
+    for task_id in range(array_size):
+        partition = task_id % num_partitions
+        partition_record_count = len(
+            range(partition, eligible_record_count, num_partitions)
+        )
+        if _task_needs_generation(
+            run_directory, task_id, array_size, partition_record_count
+        ):
+            task_ids.append(task_id)
+    return task_ids
+
+
+def array_spec(task_ids: list[int]) -> str:
+    """Format task ids as a Slurm --array spec, collapsing consecutive ids into ranges."""
+    id_ranges: list[list[int]] = []
+    for task_id in task_ids:
+        extends_previous_range = id_ranges and id_ranges[-1][1] == task_id - 1
+        if extends_previous_range:
+            id_ranges[-1][1] = task_id
+        else:
+            id_ranges.append([task_id, task_id])
+    return ",".join(
+        str(first_id) if first_id == last_id else f"{first_id}-{last_id}"
+        for first_id, last_id in id_ranges
+    )
+
+
 def _parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -130,6 +219,14 @@ def _parse_args():
         default=None,
         help="Run directory to audit (defaults to the latest run in the dataset)",
     )
+    parser.add_argument(
+        "--task-ids",
+        action="store_true",
+        help="Instead of the failure report, print the array tasks that have "
+        "unfinished records or failed comment generations as a --array spec for "
+        "submit.sh --retry-failed. Reads every shard, so run it while no generate "
+        "task is writing to the run",
+    )
     return parser.parse_args()
 
 
@@ -143,7 +240,16 @@ def _generation_file_missing_message(run_directory: Path) -> str:
 def main():
     args = _parse_args()
 
-    _, run_directory = resolve_dataset_and_run(args.dataset_dir, args.run_dir)
+    dataset_directory, run_directory = resolve_dataset_and_run(
+        args.dataset_dir, args.run_dir
+    )
+
+    if args.task_ids:
+        task_ids = task_ids_needing_generation(dataset_directory, run_directory)
+        if not task_ids:
+            raise SystemExit("No tasks have unfinished records or failed generations.")
+        print(array_spec(task_ids))
+        return
 
     if not (run_directory / f"{GENERATE_FILENAME}.jsonl").exists():
         raise SystemExit(_generation_file_missing_message(run_directory))

@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Callable
 
+from generate.audit import comment_generation_succeeded
 from generate.constants import (
     GENERATE_FILENAME,
     PROGRESS_FILENAME,
@@ -15,6 +16,7 @@ from generate.shards import dataset_record_key, repair_interrupted_shard
 from storage import (
     append_to_jsonl,
     iter_from_jsonl,
+    rewrite_jsonl,
     save_to_jsonl,
     shard_filename,
     shard_suffix,
@@ -123,12 +125,42 @@ def _generate_for_record(
     }
 
 
+def _retry_failed_generations(
+    generation_record: dict,
+    model_name: str,
+    get_completion: Callable[[str, str], str],
+) -> dict:
+    failed_generations = [
+        comment_generation
+        for comment_generation in generation_record.get("comment_generations") or []
+        if not comment_generation_succeeded(comment_generation)
+    ]
+    if not failed_generations:
+        return generation_record
+
+    for failed_generation in failed_generations:
+        failed_generation["results"] = _generate_with_llm(
+            failed_generation["prompt"],
+            generation_record["new_path"],
+            model_name,
+            get_completion,
+        )
+    logging.info(
+        "Retried %d failed comments for %s with %s",
+        len(failed_generations),
+        generation_record["new_path"],
+        model_name,
+    )
+    return generation_record
+
+
 def _generate(
     dataset_dir: Path,
     run_dir: Path,
     task_id: int,
     config: dict,
     model_names: list[str],
+    retry_failed: bool,
 ) -> None:
     num_partitions = config["num_partitions"]
     limit = config["max_generate"]
@@ -165,6 +197,17 @@ def _generate(
     # Create empty output file for a fresh run
     if not (run_dir / f"{output_filename}.jsonl").exists():
         save_to_jsonl([], run_dir, output_filename)
+
+    # Failed comments are regenerated in place, so each record stays a single
+    # line in the shard and its progress row is still accurate.
+    if retry_failed:
+        rewrite_jsonl(
+            run_dir,
+            output_filename,
+            lambda generation_record: _retry_failed_generations(
+                generation_record, model_name, model_profile.get_completion
+            ),
+        )
 
     dataset_records = iter_from_jsonl(dataset_dir, SOURCE_FILENAME)
 
@@ -293,6 +336,13 @@ def _parse_args():
         "comments for this task's partition of the eligible records into its "
         "own output shards",
     )
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Before resuming, regenerate the comments whose generation failed "
+        "in this task's shard and replace their results in place. Successful "
+        "comments are kept",
+    )
 
     args = parser.parse_args()
 
@@ -318,6 +368,7 @@ def main():
         task_id=args.task_id,
         config=manifest_config,
         model_names=model_names,
+        retry_failed=args.retry_failed,
     )
 
 

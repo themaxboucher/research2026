@@ -29,4 +29,5 @@ export HF_HUB_OFFLINE=1
 python -m generate.generate \
   --dataset-dir "${DATASET_DIR}" \
   --run-dir "${RUN_DIR}" \
-  --task-id "${SLURM_ARRAY_TASK_ID}"
+  --task-id "${SLURM_ARRAY_TASK_ID}" \
+  ${RETRY_FAILED:+--retry-failed}

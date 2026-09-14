@@ -10,6 +10,9 @@
 #   ./submit.sh --dataset-dir <timestamp>    Generate for a specific dataset (default: latest)
 #   ./submit.sh --run-dir <timestamp>        Resume an existing generation (reuses its config)
 #   ./submit.sh --array 3,7                  Submit only these task indices (resume)
+#   ./submit.sh --retry-failed               With --run-dir and --array, also regenerate the
+#                                            comments whose generation failed. List the tasks
+#                                            with: python -m generate.audit --task-ids
 #   ./submit.sh --max-generate 100           Cap records sent to the LLMs
 #   ./submit.sh --skip-setup                 Reuse the existing .venv and HF cache; skip uv sync and downloads
 
@@ -25,9 +28,10 @@ RUN_DIR=""
 ARRAY_INDICES=""
 MAX_GENERATE=""
 SKIP_SETUP=""
+RETRY_FAILED=""
 
 usage() {
-  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -40,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --array) ARRAY_INDICES="$2"; shift 2 ;;
     --max-generate) MAX_GENERATE="$2"; shift 2 ;;
     --skip-setup) SKIP_SETUP=1; shift ;;
+    --retry-failed) RETRY_FAILED=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 1 ;;
   esac
@@ -50,6 +55,13 @@ case "$PROFILE" in
   transformers|openrouter) JOB_SCRIPT="generate/scripts/job-${PROFILE}.sh" ;;
   *) echo "Unknown --profile: $PROFILE (expected transformers or openrouter)" >&2; usage 1 ;;
 esac
+
+# A retry reruns tasks of an existing run. Requiring --array keeps an empty task
+# list from falling back to the whole array
+if [[ -n "$RETRY_FAILED" && ( -z "$RUN_DIR" || -z "$ARRAY_INDICES" ) ]]; then
+  echo "--retry-failed needs --run-dir and --array. List the tasks with: python -m generate.audit --run-dir <timestamp> --task-ids" >&2
+  exit 1
+fi
 
 # Set up the Python environment from uv.lock, with the Python version pinned in
 # .python-version. --skip-setup reuses an existing .venv as-is
@@ -135,9 +147,9 @@ ARRAY_SPEC="${ARRAY_INDICES:-0-$((ARRAY_SIZE - 1))}"
 
 ARRAY_JOB_ID=$(sbatch --parsable \
   --array="$ARRAY_SPEC" \
-  --export=ALL,DATASET_DIR="$DATASET_DIR",RUN_DIR="$RUN_DIR" \
+  --export=ALL,DATASET_DIR="$DATASET_DIR",RUN_DIR="$RUN_DIR",RETRY_FAILED="$RETRY_FAILED" \
   "$JOB_SCRIPT")
-echo "Submitted array job $ARRAY_JOB_ID (--array=$ARRAY_SPEC, --profile=$PROFILE)"
+echo "Submitted array job $ARRAY_JOB_ID (--array=$ARRAY_SPEC, --profile=$PROFILE${RETRY_FAILED:+, --retry-failed})"
 
 # Phase 3: Merge the shards once every task succeeds
 FINALIZE_JOB_ID=$(sbatch --parsable \
