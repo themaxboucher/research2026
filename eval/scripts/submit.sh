@@ -59,7 +59,10 @@ source .venv/bin/activate
 # Warm the shared HF cache from the login node so the offline compute node can
 # score. --skip-setup reuses the cache as-is.
 if [[ -z "$SKIP_SETUP" ]]; then
-  python - <<'EOF'
+  # ARC kills login-node processes that use more than 5 GB of memory, and
+  # hf-xet's parallel chunk downloads can go past that. Plain HTTP streams each
+  # file straight to disk instead.
+  HF_HUB_DISABLE_XET=1 python - <<'EOF'
 from huggingface_hub import snapshot_download
 import evaluate
 

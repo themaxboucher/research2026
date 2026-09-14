@@ -75,7 +75,10 @@ export MODEL_PROFILE="$PROFILE"
 # openrouter backend calls an API and needs no local weights. --skip-setup
 # reuses the cache as-is.
 if [[ "$PROFILE" == "transformers" && -z "$SKIP_SETUP" ]]; then
-  python - <<'EOF'
+  # ARC kills login-node processes that use more than 5 GB of memory, and
+  # hf-xet's parallel chunk downloads can go past that. Plain HTTP streams each
+  # file straight to disk instead.
+  HF_HUB_DISABLE_XET=1 python - <<'EOF'
 from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
 
@@ -89,7 +92,11 @@ for model_name in MODEL_PROFILES["transformers"].model_names:
     print(f"Ensuring {model_name} is in the HF cache")
     # The weights load from safetensors, so skip the duplicate .bin and
     # original/ checkpoints some repos also ship (~40 GB)
-    snapshot_download(model_name, ignore_patterns=["*.bin", "*.pth", "original/*"])
+    snapshot_download(
+        model_name,
+        ignore_patterns=["*.bin", "*.pth", "original/*"],
+        max_workers=2,
+    )
 EOF
 fi
 
