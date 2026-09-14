@@ -16,9 +16,20 @@ dependencies = [
     "requests>=2.34.2",
     "rouge-score>=0.1.2",
     "tiktoken>=0.13.0",
+    "torch>=2.12.0",
     "tqdm>=4.67.3",
     "transformers>=5.9.0",
 ]
+
+[tool.uv.sources]
+# ARC's GPU driver supports up to CUDA 12.6, but PyPI's Linux torch is built for
+# CUDA 13 (driver 580+). macOS keeps the PyPI build.
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [tool.ruff.lint]
 extend-select = ["I"]
