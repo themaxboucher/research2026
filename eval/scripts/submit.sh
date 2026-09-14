@@ -6,7 +6,7 @@
 #   ./submit.sh --run-dir <timestamp>       Evaluate a specific run (default: latest in dataset)
 #   ./submit.sh --num-tasks 16              Width of the scoring job array
 #   ./submit.sh --array 3,7                 Submit only these task indices (resume)
-#   ./submit.sh --skip-setup                Reuse the existing .venv; skip pip install
+#   ./submit.sh --skip-setup                Reuse the existing .venv and HF cache; skip uv sync and downloads
 #   ./submit.sh --force                     Rescore results that were already scored
 
 set -euo pipefail
@@ -39,40 +39,41 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Set up the Python environment. --skip-setup reuses an existing .venv as-is
-module load gcc arrow/25.0.0
-module load python/3.13
-
+# Set up the Python environment from uv.lock, with the Python version pinned in
+# .python-version. --skip-setup reuses an existing .venv as-is
 if [[ -n "$SKIP_SETUP" ]]; then
   if [[ ! -d .venv ]]; then
     echo "No .venv found; run without --skip-setup first to create it." >&2
     exit 1
   fi
-  source .venv/bin/activate
 else
-  if [[ ! -d .venv ]]; then
-    echo "Creating virtual environment in .venv"
-    python -m venv .venv
+  export PATH="$HOME/.local/bin:$PATH"
+  if ! command -v uv >/dev/null; then
+    echo "uv not found; install it once with: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    exit 1
   fi
-  source .venv/bin/activate
-  python -m pip install --upgrade pip
-  python -m pip install -r requirements.txt
+  uv sync --locked --no-dev
 fi
+source .venv/bin/activate
 
-# Warm the shared HF cache from the login node so the offline compute node can score.
-python - <<'EOF'
+# Warm the shared HF cache from the login node so the offline compute node can
+# score. --skip-setup reuses the cache as-is.
+if [[ -z "$SKIP_SETUP" ]]; then
+  python - <<'EOF'
 from huggingface_hub import snapshot_download
 import evaluate
 
 from eval.constants import BERTSCORE_MODEL
 
 print(f"Ensuring {BERTSCORE_MODEL} is in the HF cache")
-snapshot_download(BERTSCORE_MODEL)
+# BERTScore loads the PyTorch weights, so skip the TensorFlow and Flax copies
+snapshot_download(BERTSCORE_MODEL, ignore_patterns=["*.h5", "*.msgpack"])
 
 for metric in ("rouge", "bleu", "bertscore"):
     print(f"Caching {metric} metric script")
     evaluate.load(metric)
 EOF
+fi
 
 # Phase 1: Prepare. Records the array width in the run's eval manifest so the
 # tasks agree on the partitioning and a single failed shard can be resubmitted.
@@ -97,6 +98,9 @@ fi
 echo "Dataset dir: $DATASET_DIR"
 echo "Run dir:     $RUN_DIR"
 echo "Num tasks:   $NUM_TASKS"
+
+# Slurm opens each job's --output file in logs/ before the job script runs
+mkdir -p logs
 
 # Phase 2: Submit the scoring array
 ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}"

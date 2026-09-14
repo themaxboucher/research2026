@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=filter-dataset
+#SBATCH --partition=cpu2019,cpu2021,cpu2022,cpu2019-bf05
 #SBATCH --time=03:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
@@ -14,8 +15,6 @@ mkdir -p logs
 # Submitted as an array by collect/scripts/filter-submit.sh, which exports the
 # array width the tasks partition the repos on.
 : "${NUM_TASKS:?NUM_TASKS must be exported; submit with collect/scripts/filter-submit.sh}"
-
-module load python/3.13
 
 source .venv/bin/activate
 

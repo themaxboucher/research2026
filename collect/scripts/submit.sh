@@ -4,11 +4,11 @@
 #   ./submit.sh                             Fresh run with defaults
 #   ./submit.sh --dataset-dir <timestamp>   Resume an existing dataset (reuses its cache)
 #   ./submit.sh --array 3,7,12              Submit only these task indices (resume)
-#   ./submit.sh --repos-per-task 10         Repos per task (default 10)
+#   ./submit.sh --repos-per-task 10         Repos per task (default 1)
 #   ./submit.sh --throttle 20               Max concurrent array tasks (default 20)
 #   ./submit.sh --max-repos 1000            Cap repos searched (passed to --prepare)
 #   ./submit.sh --repo-min-stars 50         Min stars filter (passed to --prepare)
-#   ./submit.sh --skip-setup                Reuse the existing .venv; skip pip install
+#   ./submit.sh --skip-setup                Reuse the existing .venv; skip uv sync
 
 set -euo pipefail
 
@@ -47,24 +47,22 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
-# Set up the Python environment. --skip-setup reuses an existing .venv as-is
-module load python/3.13
-
+# Set up the Python environment from uv.lock, with the Python version pinned in
+# .python-version. --skip-setup reuses an existing .venv as-is
 if [[ -n "$SKIP_SETUP" ]]; then
   if [[ ! -d .venv ]]; then
     echo "No .venv found; run without --skip-setup first to create it." >&2
     exit 1
   fi
-  source .venv/bin/activate
 else
-  if [[ ! -d .venv ]]; then
-    echo "Creating virtual environment in .venv"
-    python -m venv .venv
+  export PATH="$HOME/.local/bin:$PATH"
+  if ! command -v uv >/dev/null; then
+    echo "uv not found; install it once with: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    exit 1
   fi
-  source .venv/bin/activate
-  python -m pip install --upgrade pip
-  python -m pip install -r requirements.txt
+  uv sync --locked --no-dev
 fi
+source .venv/bin/activate
 
 # Phase 1: Prepare
 PREP_ARGS=(--repos-per-task "$REPOS_PER_TASK")
@@ -87,6 +85,9 @@ fi
 
 echo "Dataset dir:   $DATASET_DIR"
 echo "Num tasks: $NUM_TASKS"
+
+# Slurm opens each job's --output file in logs/ before the job script runs
+mkdir -p logs
 
 # Phase 2: Submit the jobs array
 ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}%${THROTTLE}"

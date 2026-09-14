@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=generate-finalize
+#SBATCH --partition=cpu2019,cpu2021,cpu2022,cpu2019-bf05
 #SBATCH --time=01:30:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=64G
@@ -10,8 +11,6 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR}"
 
 mkdir -p logs
-
-module load python/3.13
 
 source .venv/bin/activate
 

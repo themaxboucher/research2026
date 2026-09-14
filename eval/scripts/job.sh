@@ -1,5 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=evaluate-comments
+# 12 hours rules out ARC's 5-hour backfill partitions but fits the 24-hour ones
+#SBATCH --partition=cpu2019,cpu2021,cpu2022,cpu2021-bf24,cpu2022-bf24
 #SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -10,8 +12,6 @@ set -euo pipefail
 cd "${SLURM_SUBMIT_DIR}"
 
 mkdir -p logs
-
-module load python/3.13
 
 source .venv/bin/activate
 

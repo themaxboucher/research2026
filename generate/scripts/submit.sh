@@ -11,7 +11,7 @@
 #   ./submit.sh --run-dir <timestamp>        Resume an existing generation (reuses its config)
 #   ./submit.sh --array 3,7                  Submit only these task indices (resume)
 #   ./submit.sh --max-generate 100           Cap records sent to the LLMs
-#   ./submit.sh --skip-setup                 Reuse the existing .venv; skip pip install
+#   ./submit.sh --skip-setup                 Reuse the existing .venv and HF cache; skip uv sync and downloads
 
 set -euo pipefail
 
@@ -51,39 +51,44 @@ case "$PROFILE" in
   *) echo "Unknown --profile: $PROFILE (expected transformers or openrouter)" >&2; usage 1 ;;
 esac
 
-# Set up the Python environment. --skip-setup reuses an existing .venv as-is
-module load python/3.13
-
+# Set up the Python environment from uv.lock, with the Python version pinned in
+# .python-version. --skip-setup reuses an existing .venv as-is
 if [[ -n "$SKIP_SETUP" ]]; then
   if [[ ! -d .venv ]]; then
     echo "No .venv found; run without --skip-setup first to create it." >&2
     exit 1
   fi
-  source .venv/bin/activate
 else
-  if [[ ! -d .venv ]]; then
-    echo "Creating virtual environment in .venv"
-    python -m venv .venv
+  export PATH="$HOME/.local/bin:$PATH"
+  if ! command -v uv >/dev/null; then
+    echo "uv not found; install it once with: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+    exit 1
   fi
-  source .venv/bin/activate
-  python -m pip install --upgrade pip
-  python -m pip install -r requirements.txt
+  uv sync --locked --no-dev
 fi
+source .venv/bin/activate
 
 export MODEL_PROFILE="$PROFILE"
 
 # Warm the shared HF cache from the login node so the offline compute nodes can
 # load the weights. Only the transformers backend runs models locally; the
-# openrouter backend calls an API and needs no local weights.
-if [[ "$PROFILE" == "transformers" ]]; then
+# openrouter backend calls an API and needs no local weights. --skip-setup
+# reuses the cache as-is.
+if [[ "$PROFILE" == "transformers" && -z "$SKIP_SETUP" ]]; then
   python - <<'EOF'
+from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
 
 from generate.providers.models import MODEL_PROFILES
 
+# HF_TOKEN from .env grants access to the gated Meta models
+load_dotenv()
+
 for model_name in MODEL_PROFILES["transformers"].model_names:
     print(f"Ensuring {model_name} is in the HF cache")
-    snapshot_download(model_name)
+    # The weights load from safetensors, so skip the duplicate .bin and
+    # original/ checkpoints some repos also ship (~40 GB)
+    snapshot_download(model_name, ignore_patterns=["*.bin", "*.pth", "original/*"])
 EOF
 fi
 
@@ -113,6 +118,9 @@ echo "Dataset dir: $DATASET_DIR"
 echo "Run dir:     $RUN_DIR"
 echo "Partitions:  $NUM_PARTITIONS"
 echo "Array size:  $ARRAY_SIZE (one task per model per partition)"
+
+# Slurm opens each job's --output file in logs/ before the job script runs
+mkdir -p logs
 
 # Phase 2: Submit the jobs array
 ARRAY_SPEC="${ARRAY_INDICES:-0-$((ARRAY_SIZE - 1))}"
