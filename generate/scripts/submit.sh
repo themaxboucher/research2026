@@ -81,8 +81,9 @@ from huggingface_hub import snapshot_download
 
 from generate.providers.models import MODEL_PROFILES
 
-# HF_TOKEN from .env grants access to the gated Meta models
-load_dotenv()
+# HF_TOKEN from .env grants access to the gated Meta models. The path is
+# explicit because find_dotenv() can't locate a script read from stdin
+load_dotenv(".env")
 
 for model_name in MODEL_PROFILES["transformers"].model_names:
     print(f"Ensuring {model_name} is in the HF cache")
