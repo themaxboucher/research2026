@@ -103,6 +103,23 @@ def drop_trailing_records(
     return removed_records
 
 
+def rewrite_jsonl(
+    directory: Path, filename: str, rewrite_record: Callable[[dict], dict]
+) -> None:
+    jsonl_path = directory / f"{filename}.jsonl"
+    # The rewritten file only replaces the original once it is complete, so a
+    # killed rewrite leaves the original untouched. Its name does not end in
+    # .jsonl, so shard globs never pick up a leftover one.
+    rewritten_path = directory / f"{filename}.jsonl.rewriting"
+    with rewritten_path.open("w", encoding="utf-8") as rewritten_file:
+        for record in iter_from_jsonl(directory, filename):
+            rewritten_record = rewrite_record(record)
+            rewritten_file.write(
+                json.dumps(rewritten_record, ensure_ascii=False) + "\n"
+            )
+    os.replace(rewritten_path, jsonl_path)
+
+
 def shard_suffix(task_id: int, num_tasks: int) -> str:
     digit_width = max(len(str(num_tasks - 1)), 1)
     return f"{task_id:0{digit_width}d}"
