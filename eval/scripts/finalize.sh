@@ -11,6 +11,7 @@ cd "${SLURM_SUBMIT_DIR}"
 
 mkdir -p logs
 
+module load gcc arrow/25.0.0
 module load python/3.13
 
 source .venv/bin/activate
