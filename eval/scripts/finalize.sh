@@ -22,4 +22,5 @@ export HF_HUB_OFFLINE=1
 
 python -m eval.finalize \
   --dataset-dir "${DATASET_DIR}" \
-  --run-dir "${RUN_DIR}"
+  --run-dir "${RUN_DIR}" \
+  "$@"

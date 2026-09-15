@@ -98,14 +98,20 @@ def _merge_shards(run_dir: Path, filename: str, num_tasks: int | None) -> int:
     return shard_count
 
 
-def _finalize(run_dir: Path) -> None:
-    """Merge the per-task scored shards, then write the aggregate metrics."""
-    num_tasks = read_eval_manifest(run_dir).get("num_tasks")
-    _merge_shards(run_dir, GENERATE_FILENAME, num_tasks)
+def _finalize(run_dir: Path, *, skip_merge: bool = False) -> None:
+    """Optionally merge scored shards, then write the aggregate metrics."""
+    merged_path = run_dir / f"{GENERATE_FILENAME}_scored.jsonl"
+    if skip_merge:
+        if not merged_path.is_file():
+            raise SystemExit(f"Cannot skip merge: merged file does not exist: {merged_path}")
+        logging.info("Skipping shard merge; using %s", merged_path)
+    else:
+        num_tasks = read_eval_manifest(run_dir).get("num_tasks")
+        _merge_shards(run_dir, GENERATE_FILENAME, num_tasks)
 
     scorer = CommentScorer()
 
-    if (run_dir / f"{GENERATE_FILENAME}_scored.jsonl").exists():
+    if merged_path.exists():
         records = load_from_jsonl(run_dir, (GENERATE_FILENAME + "_scored"))
         _write_location_metrics(records, run_dir, scorer)
         logging.info("Wrote location metrics for %s", run_dir.name)
@@ -125,6 +131,11 @@ def _parse_args():
         default=None,
         help="Run directory to evaluate (defaults to the latest run in the dataset)",
     )
+    parser.add_argument(
+        "--skip-merge",
+        action="store_true",
+        help="Compute aggregate metrics from the existing merged scored JSONL file",
+    )
     return parser.parse_args()
 
 
@@ -133,7 +144,7 @@ def main():
     args = _parse_args()
 
     _, run_directory = resolve_dataset_and_run(args.dataset_dir, args.run_dir)
-    _finalize(run_directory)
+    _finalize(run_directory, skip_merge=args.skip_merge)
 
 
 if __name__ == "__main__":
