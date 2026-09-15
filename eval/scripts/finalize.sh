@@ -21,6 +21,6 @@ export TQDM_DISABLE=1
 export HF_HUB_OFFLINE=1
 
 python -m eval.finalize \
-  --dataset-dir "${DATASET_DIR}" \
-  --run-dir "${RUN_DIR}" \
+  --dataset-dir "${DATASET_DIR:-}" \
+  --run-dir "${RUN_DIR:-}" \
   "$@"
