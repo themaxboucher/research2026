@@ -2,7 +2,7 @@
 #SBATCH --job-name=evaluate-finalize
 #SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
+#SBATCH --mem=256G
 #SBATCH --output=logs/evaluate-finalize-%j.out
 
 set -euo pipefail

@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from eval.constants import (
-    LOCATION_METRICS_FILENAME,
+    METRICS_FILENAME,
     SCORE_METRICS,
     UNKNOWN_MODEL,
 )
@@ -68,7 +68,7 @@ def _write_location_metrics(
         {"model": model, **_summarize_scores(scored_by_model[model], scorer)}
         for model in sorted(scored_by_model)
     ]
-    _save_metrics(metrics, run_dir, LOCATION_METRICS_FILENAME)
+    _save_metrics(metrics, run_dir, METRICS_FILENAME)
 
 
 def _merge_shards(run_dir: Path, filename: str, num_tasks: int | None) -> int:
