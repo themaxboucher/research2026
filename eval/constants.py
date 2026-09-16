@@ -1,4 +1,4 @@
-LOCATION_METRICS_FILENAME = "location_metrics"
+METRICS_FILENAME = "metrics"
 
 BLEU_MAX_ORDER = 4
 BLEU_METRICS = tuple(f"bleu{order}" for order in range(1, BLEU_MAX_ORDER + 1))

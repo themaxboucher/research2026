@@ -20,14 +20,14 @@ def _analyze(run_dir: Path) -> None:
         logging.info("Processing record %d", record_num)
         for comment_generation in record.get("comment_generations") or []:
             try:
-                cognitive_comp = cognitive_complexity(comment_generation["code_scope"])
+                cognitive_comp = cognitive_complexity(comment_generation["prompt_code"])
                 comment_generation["cognitive_complexity"] = cognitive_comp
             except Exception as e:
                 logging.warning(
                     "Error occurred while calculating cognitive complexity: %s", e
                 )
             try:
-                cyclomatic_comp = cyclomatic_complexity(comment_generation["code_scope"])
+                cyclomatic_comp = cyclomatic_complexity(comment_generation["prompt_code"])
                 comment_generation["cyclomatic_complexity"] = cyclomatic_comp
             except Exception as e:
                 logging.warning(
