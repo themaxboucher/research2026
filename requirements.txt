@@ -20,6 +20,8 @@ requests==2.34.2
     # via research2026 (pyproject.toml)
 rouge-score==0.1.2
     # via research2026 (pyproject.toml)
+scipy==1.18.1
+    # via research2026 (pyproject.toml)
 tiktoken==0.13.0
     # via research2026 (pyproject.toml)
 tqdm==4.67.3
