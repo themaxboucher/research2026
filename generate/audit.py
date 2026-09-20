@@ -1,7 +1,7 @@
 import argparse
 import re
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,7 +18,7 @@ _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
 
 
-def failure_reason(result: dict) -> str:
+def failure_reason(result: dict, *, truncate: bool = True) -> str:
     """Collapse one failed completion's error into the reason it is grouped
     under. Provider errors embed the specifics of the call that hit them --
     sizes, device ids, process ids -- so those are generalized away to leave
@@ -33,24 +33,42 @@ def failure_reason(result: dict) -> str:
         return UNRECORDED_ERROR_REASON
 
     generalized = _NUMBER_PATTERN.sub("N", single_spaced)
-    if len(generalized) <= MAX_REASON_LENGTH:
+    if not truncate or len(generalized) <= MAX_REASON_LENGTH:
         return generalized
     return generalized[:MAX_REASON_LENGTH].rstrip() + "..."
 
 
-def is_failed_completion(result: dict) -> bool:
-    return result.get("error") is not None or result.get("comment_text") is None
+def reason_is_skipped(result: dict, skipped_reasons: Sequence[str]) -> bool:
+    """Whether a failed completion's reason contains one of the reasons the
+    caller asked to ignore. Matching is on the untruncated reason, so a pattern
+    longer than the report's column still works."""
+    if not skipped_reasons:
+        return False
+    reason = failure_reason(result, truncate=False).casefold()
+    return any(skipped.casefold() in reason for skipped in skipped_reasons)
 
 
-def comment_generation_succeeded(comment_generation: dict) -> bool:
+def is_failed_completion(result: dict, skipped_reasons: Sequence[str] = ()) -> bool:
+    if result.get("error") is None and result.get("comment_text") is not None:
+        return False
+    return not reason_is_skipped(result, skipped_reasons)
+
+
+def comment_generation_succeeded(
+    comment_generation: dict, skipped_reasons: Sequence[str] = ()
+) -> bool:
     results = comment_generation.get("results") or []
-    return bool(results) and not any(is_failed_completion(result) for result in results)
+    return bool(results) and not any(
+        is_failed_completion(result, skipped_reasons) for result in results
+    )
 
 
-def _record_has_failed_generation(record: dict) -> bool:
+def _record_has_failed_generation(
+    record: dict, skipped_reasons: Sequence[str] = ()
+) -> bool:
     comment_generations = record.get("comment_generations") or []
     return not all(
-        comment_generation_succeeded(comment_generation)
+        comment_generation_succeeded(comment_generation, skipped_reasons)
         for comment_generation in comment_generations
     )
 
@@ -140,7 +158,11 @@ def _eligible_record_count(dataset_directory: Path, max_generate: int | None) ->
 
 
 def _task_needs_generation(
-    run_directory: Path, task_id: int, array_size: int, partition_record_count: int
+    run_directory: Path,
+    task_id: int,
+    array_size: int,
+    partition_record_count: int,
+    skipped_reasons: Sequence[str] = (),
 ) -> bool:
     suffix = shard_suffix(task_id, array_size)
     progress_filename = shard_filename(PROGRESS_FILENAME, suffix)
@@ -156,16 +178,18 @@ def _task_needs_generation(
 
     output_filename = shard_filename(GENERATE_FILENAME, suffix)
     return any(
-        _record_has_failed_generation(record)
+        _record_has_failed_generation(record, skipped_reasons)
         for record in iter_from_jsonl(run_directory, output_filename)
     )
 
 
 def task_ids_needing_generation(
-    dataset_directory: Path, run_directory: Path
+    dataset_directory: Path, run_directory: Path, skipped_reasons: Sequence[str] = ()
 ) -> list[int]:
     """Return the array tasks that have unfinished records or a failed comment
-    generation: the tasks a --retry-failed resubmission has to run."""
+    generation: the tasks a --retry-failed resubmission has to run. Failures
+    whose reason matches `skipped_reasons` don't count; unfinished records
+    always do."""
     manifest = read_manifest(run_directory)
     if not manifest:
         raise SystemExit(f"No run manifest in {run_directory}.")
@@ -184,7 +208,11 @@ def task_ids_needing_generation(
             range(partition, eligible_record_count, num_partitions)
         )
         if _task_needs_generation(
-            run_directory, task_id, array_size, partition_record_count
+            run_directory,
+            task_id,
+            array_size,
+            partition_record_count,
+            skipped_reasons,
         ):
             task_ids.append(task_id)
     return task_ids
@@ -227,6 +255,15 @@ def _parse_args():
         "submit.sh --retry-failed. Reads every shard, so run it while no generate "
         "task is writing to the run",
     )
+    parser.add_argument(
+        "--skip-failure-reason",
+        action="append",
+        default=[],
+        metavar="TEXT",
+        help="Ignore failures whose reason contains TEXT, case-insensitive. "
+        "Repeatable. Reasons generalize numbers to N, so match on words "
+        "(e.g. 'context limit'). Only applies with --task-ids",
+    )
     return parser.parse_args()
 
 
@@ -245,7 +282,9 @@ def main():
     )
 
     if args.task_ids:
-        task_ids = task_ids_needing_generation(dataset_directory, run_directory)
+        task_ids = task_ids_needing_generation(
+            dataset_directory, run_directory, tuple(args.skip_failure_reason)
+        )
         if not task_ids:
             raise SystemExit("No tasks have unfinished records or failed generations.")
         print(array_spec(task_ids))
