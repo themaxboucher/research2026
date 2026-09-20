@@ -19,6 +19,7 @@ from storage.jsonl import iter_from_jsonl, save_to_jsonl
 
 TRANSFORMERS_PROFILE = "transformers"
 DEFAULT_WORST_PROMPTS = 5
+OUTPUT_FILENAME = "overflows.jsonl"
 
 
 @dataclass
@@ -293,8 +294,8 @@ def _parse_args():
     parser.add_argument(
         "--out",
         type=str,
-        default=None,
-        help="Write the overflowing comments to this .jsonl file",
+        default=OUTPUT_FILENAME,
+        help=f"Write the overflowing comments to this .jsonl file (default: {OUTPUT_FILENAME})",
     )
     return parser.parse_args()
 
