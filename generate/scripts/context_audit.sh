@@ -16,5 +16,4 @@ source .venv/bin/activate
 
 export TQDM_DISABLE=1
 
-python -m generate.context_audit \
-  --dataset-dir "${DATASET_DIR}"
+python -m generate.context_audit
