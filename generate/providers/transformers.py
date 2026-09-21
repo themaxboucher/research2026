@@ -10,7 +10,11 @@ MAX_OUTPUT_TOKENS = 512
 
 @lru_cache(maxsize=MAX_CACHED_MODELS)
 def _load_text_generation_pipeline(model_name: str):
-    return pipeline("text-generation", model=model_name, device_map="auto")
+    text_generation_pipeline = pipeline("text-generation", model=model_name, device_map="auto")
+    # We only ever do chat completion. CodeLlama's tokenizer otherwise treats a
+    # literal <FILL_ME> in the prompt code as an infilling sentinel and splits on it.
+    text_generation_pipeline.tokenizer.fill_token = None
+    return text_generation_pipeline
 
 
 @lru_cache(maxsize=None)
