@@ -5,6 +5,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tqdm.auto import tqdm
+
 from generate.constants import GENERATE_FILENAME, PROGRESS_FILENAME, SOURCE_FILENAME
 from generate.shards import dataset_record_key
 from storage.jsonl import iter_from_jsonl, shard_filename, shard_suffix
@@ -103,7 +105,8 @@ def tally_failed_completions(run_directory: Path) -> CompletionFailureTally:
     """Count every LLM completion in a finalized run and group the failed ones
     by the reason they failed."""
     tally = CompletionFailureTally()
-    for record in iter_from_jsonl(run_directory, GENERATE_FILENAME):
+    records = iter_from_jsonl(run_directory, GENERATE_FILENAME)
+    for record in tqdm(records, desc="Tallying completions", unit="record"):
         for result in _completion_results(record):
             tally.add_completion(result)
     return tally
@@ -202,7 +205,7 @@ def task_ids_needing_generation(
     )
 
     task_ids = []
-    for task_id in range(array_size):
+    for task_id in tqdm(range(array_size), desc="Auditing tasks", unit="task"):
         partition = task_id % num_partitions
         partition_record_count = len(
             range(partition, eligible_record_count, num_partitions)
