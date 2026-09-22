@@ -10,16 +10,20 @@ MAX_OUTPUT_TOKENS = 512
 
 @lru_cache(maxsize=MAX_CACHED_MODELS)
 def _load_text_generation_pipeline(model_name: str):
-    text_generation_pipeline = pipeline("text-generation", model=model_name, device_map="auto")
-    # We only ever do chat completion. CodeLlama's tokenizer otherwise treats a
-    # literal <FILL_ME> in the prompt code as an infilling sentinel and splits on it.
-    text_generation_pipeline.tokenizer.fill_token = None
-    return text_generation_pipeline
+    return pipeline(
+        "text-generation",
+        model=model_name,
+        tokenizer=load_tokenizer(model_name),
+        device_map="auto",
+    )
 
 
 @lru_cache(maxsize=None)
 def load_tokenizer(model_name: str):
-    return AutoTokenizer.from_pretrained(model_name)
+    # We only ever do chat completion. CodeLlama's tokenizer otherwise registers
+    # <FILL_ME> as a special token with no embedding row, so a literal <FILL_ME>
+    # in the prompt code indexes past the embedding table on the GPU.
+    return AutoTokenizer.from_pretrained(model_name, fill_token=None)
 
 
 @lru_cache(maxsize=None)
