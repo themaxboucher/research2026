@@ -19,7 +19,7 @@ from storage.jsonl import iter_from_jsonl, save_to_jsonl
 
 TRANSFORMERS_PROFILE = "transformers"
 DEFAULT_WORST_PROMPTS = 5
-OUTPUT_FILENAME = "overflows.jsonl"
+OUTPUT_FILENAME = "overflows"
 
 
 @dataclass
@@ -291,12 +291,6 @@ def _parse_args():
         default=DEFAULT_WORST_PROMPTS,
         help=f"Longest prompts to list per model (default: {DEFAULT_WORST_PROMPTS})",
     )
-    parser.add_argument(
-        "--out",
-        type=str,
-        default=OUTPUT_FILENAME,
-        help=f"Write the overflowing comments to this .jsonl file (default: {OUTPUT_FILENAME})",
-    )
     return parser.parse_args()
 
 
@@ -316,10 +310,9 @@ def main():
 
     print_context_report(dataset_directory, tallies, args.worst_prompts)
 
-    if args.out:
-        output_path = Path(args.out)
-        written = write_overflow_records(tallies, output_path)
-        logging.info("Wrote %d overflowing comments to %s", written, output_path)
+    output_path = dataset_directory / (OUTPUT_FILENAME + ".jsonl")
+    written = write_overflow_records(tallies, output_path)
+    logging.info("Wrote %d overflowing comments to %s", written, output_path)
 
 
 if __name__ == "__main__":
