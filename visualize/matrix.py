@@ -20,10 +20,23 @@ SCORE_LABELS = {
     "bertscore_f1": "BERTScore",
 }
 COMPLEXITY_LABELS = {
-    "cyclomatic_complexity": "Cyclomatic Complexity",
-    "cognitive_complexity": "Cognitive Complexity",
+    "cyclomatic_complexity": "Cyclomatic\nComplexity",
+    "cognitive_complexity": "Cognitive\nComplexity",
+    "lines_of_code": "Lines\nof Code",
+    "logical_lines_of_code": "Logical\nLines of Code",
+    "comment_density": "Comment\nDensity",
+    "reference_comment_length": "Reference\nComment Length",
+    "generated_comment_length": "Generated\nComment Length",
 }
 CORRELATION_METHODS = ("pearson", "spearman")
+LABEL_AREA_WIDTH_INCHES = 2.8
+METRIC_COLUMN_WIDTH_INCHES = 1.5
+PANEL_WIDTH_INCHES = LABEL_AREA_WIDTH_INCHES + METRIC_COLUMN_WIDTH_INCHES * len(
+    COMPLEXITY_LABELS
+)
+METRIC_COLUMNS_START = LABEL_AREA_WIDTH_INCHES / PANEL_WIDTH_INCHES
+METRIC_COLUMNS_WIDTH = 1 - METRIC_COLUMNS_START
+SCORE_LABELS_START = METRIC_COLUMNS_START * 0.55
 
 
 def read_correlations_json(run_directory: Path) -> list[dict]:
@@ -41,6 +54,11 @@ def _format_correlation(correlation: dict, method: str) -> str:
     return f"{coefficient:.4f}{significance}"
 
 
+def _metric_column_center(column: int) -> float:
+    column_width = METRIC_COLUMNS_WIDTH / len(COMPLEXITY_LABELS)
+    return METRIC_COLUMNS_START + column_width * (column + 0.5)
+
+
 def _draw_matrix(axes, correlations: dict, model: str, method: str) -> None:
     row_count = len(SCORE_LABELS)
     axes.set_xlim(0, 1)
@@ -49,22 +67,35 @@ def _draw_matrix(axes, correlations: dict, model: str, method: str) -> None:
     axes.set_title(f"{model} — {method.title()}", fontsize=11, pad=8)
     axes.hlines([0, row_count + 2.7], 0, 1, color="black", linewidth=0.8)
     axes.hlines(row_count + 0.6, 0, 1, color="0.4", linewidth=0.6)
-    axes.hlines(row_count + 1.6, 0.4, 1, color="black", linewidth=0.6)
-    axes.text(0.7, row_count + 2.1, "Code Quality Metric", ha="center", va="center")
+    axes.hlines(row_count + 1.6, METRIC_COLUMNS_START, 1, color="black", linewidth=0.6)
+    axes.text(
+        METRIC_COLUMNS_START + METRIC_COLUMNS_WIDTH / 2,
+        row_count + 2.1,
+        "Code and Comment Metrics",
+        ha="center",
+        va="center",
+    )
     axes.text(0.02, row_count / 2, "NLP Metrics", va="center")
 
     for column, label in enumerate(COMPLEXITY_LABELS.values()):
-        axes.text(0.55 + column * 0.3, row_count + 1.1, label, ha="center", va="center")
+        axes.text(
+            _metric_column_center(column),
+            row_count + 1.1,
+            label,
+            ha="center",
+            va="center",
+            fontsize=8,
+        )
 
     for row, label in enumerate(SCORE_LABELS.values()):
-        axes.text(0.22, row_count - row - 0.2, label, va="center")
+        axes.text(SCORE_LABELS_START, row_count - row - 0.2, label, va="center")
 
     for (row, score), (column, complexity) in product(
         enumerate(SCORE_LABELS), enumerate(COMPLEXITY_LABELS)
     ):
         correlation = correlations.get((model, score, complexity), {})
         axes.text(
-            0.55 + column * 0.3,
+            _metric_column_center(column),
             row_count - row - 0.2,
             _format_correlation(correlation, method),
             ha="center",
@@ -84,7 +115,13 @@ def plot_matrices(correlations: list[dict], output_path: Path) -> None:
     }
     with plt.rc_context({"font.family": "serif", "font.size": 10}):
         figure, axes_grid = plt.subplots(
-            len(models), 2, figsize=(14, 2.8 * len(models)), squeeze=False
+            len(models),
+            len(CORRELATION_METHODS),
+            figsize=(
+                PANEL_WIDTH_INCHES * len(CORRELATION_METHODS),
+                2.8 * len(models),
+            ),
+            squeeze=False,
         )
         for (row, model), (column, method) in product(
             enumerate(models), enumerate(CORRELATION_METHODS)

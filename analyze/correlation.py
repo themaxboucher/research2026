@@ -14,7 +14,16 @@ from generate.constants import GENERATE_FILENAME
 from storage import iter_from_jsonl
 from storage.runs import resolve_dataset_and_run
 
-COMPLEXITY_METRICS = ("cyclomatic_complexity", "cognitive_complexity")
+COMMENT_GENERATION_METRICS = (
+    "cyclomatic_complexity",
+    "cognitive_complexity",
+    "lines_of_code",
+    "logical_lines_of_code",
+    "comment_density",
+    "reference_comment_length",
+)
+RESULT_METRICS = ("generated_comment_length",)
+COMPLEXITY_METRICS = COMMENT_GENERATION_METRICS + RESULT_METRICS
 CORRELATIONS_FILENAME = "correlations.json"
 
 
@@ -22,7 +31,7 @@ def _scored_results(comment_generation: dict):
     for result in comment_generation.get("results") or []:
         if result.get("error") or not result.get("scores"):
             continue
-        yield result.get("model") or UNKNOWN_MODEL, result["scores"]
+        yield result.get("model") or UNKNOWN_MODEL, result
 
 
 def _iter_samples(records: Iterable[dict]):
@@ -33,14 +42,17 @@ def _iter_samples(records: Iterable[dict]):
 def _samples_by_model(records: Iterable[dict]) -> dict[str, list[dict]]:
     samples_by_model = defaultdict(list)
     for comment_generation in _iter_samples(records):
-        complexities = {
-            metric: comment_generation.get(metric) for metric in COMPLEXITY_METRICS
+        comment_generation_metrics = {
+            metric: comment_generation.get(metric)
+            for metric in COMMENT_GENERATION_METRICS
         }
-        for model, scores in _scored_results(comment_generation):
+        for model, result in _scored_results(comment_generation):
+            scores = result["scores"]
             samples_by_model[model].append(
                 {
                     **{metric: scores.get(metric) for metric in SCORE_METRICS},
-                    **complexities,
+                    **comment_generation_metrics,
+                    **{metric: result.get(metric) for metric in RESULT_METRICS},
                 }
             )
     return samples_by_model
@@ -117,7 +129,7 @@ def _correlate_run(run_dir: Path) -> None:
         logging.warning("No scored results found in %s", run_dir)
     elif not any(row["n"] >= 2 for row in correlations):
         logging.warning(
-            "Too few paired samples; run analyze.analyze to add complexity metrics"
+            "Too few paired samples; run analyze.analyze to add code and comment metrics"
         )
     output_path = run_dir / CORRELATIONS_FILENAME
     output_path.write_text(

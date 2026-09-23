@@ -1,6 +1,7 @@
 import ast
 
 from cognitive_complexity.api import get_cognitive_complexity_for_node
+from radon.raw import analyze
 from radon.visitors import ComplexityVisitor
 
 STRAIGHT_LINE = '''
@@ -331,6 +332,23 @@ def cyclomatic_complexity(code: str) -> int:
 
 def cognitive_complexity(code: str) -> int:
     return get_cognitive_complexity_for_node(ast.parse(code))
+
+
+def lines_of_code(code: str) -> int:
+    return analyze(code).loc
+
+
+def logical_lines_of_code(code: str) -> int:
+    return analyze(code).lloc
+
+
+def prompt_comment_density(prompt_code: str) -> float:
+    """Share of lines carrying a `#` comment, leaving out the one placeholder
+    comment every prompt snippet has. Docstrings do not count as comments."""
+    raw_metrics = analyze(prompt_code)
+    placeholder_comment_line_count = 1
+    comment_line_count = raw_metrics.comments - placeholder_comment_line_count
+    return comment_line_count / raw_metrics.loc
 
 
 def main():

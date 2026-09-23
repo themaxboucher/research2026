@@ -2,10 +2,54 @@ import argparse
 import logging
 from pathlib import Path
 
-from analyze.complexity import cognitive_complexity, cyclomatic_complexity
+from analyze.complexity import (
+    cognitive_complexity,
+    cyclomatic_complexity,
+    lines_of_code,
+    logical_lines_of_code,
+    prompt_comment_density,
+)
+from eval.normalize import normalize_comment
 from generate.constants import GENERATE_FILENAME
 from storage.jsonl import load_from_jsonl, save_to_jsonl
 from storage.runs import resolve_dataset_and_run
+
+PROMPT_CODE_METRICS = {
+    "cognitive_complexity": cognitive_complexity,
+    "cyclomatic_complexity": cyclomatic_complexity,
+    "lines_of_code": lines_of_code,
+    "logical_lines_of_code": logical_lines_of_code,
+    "comment_density": prompt_comment_density,
+}
+
+
+def comment_word_count(comment: str) -> int:
+    """Words in the comment as the scorers see it, with `#` markers removed."""
+    return len(normalize_comment(comment).split())
+
+
+def _add_prompt_code_metrics(comment_generation: dict) -> None:
+    for metric_name, compute_metric in PROMPT_CODE_METRICS.items():
+        try:
+            comment_generation[metric_name] = compute_metric(
+                comment_generation["prompt_code"]
+            )
+        except Exception as e:
+            logging.warning("Error occurred while calculating %s: %s", metric_name, e)
+
+
+def _add_comment_lengths(comment_generation: dict) -> None:
+    reference_comment = comment_generation.get("comment")
+    if reference_comment is not None:
+        comment_generation["reference_comment_length"] = comment_word_count(
+            reference_comment
+        )
+
+    for result in comment_generation.get("results") or []:
+        generated_comment = result.get("comment_text")
+        if generated_comment is None:
+            continue
+        result["generated_comment_length"] = comment_word_count(generated_comment)
 
 
 def _analyze(run_dir: Path) -> None:
@@ -13,31 +57,17 @@ def _analyze(run_dir: Path) -> None:
     records = load_from_jsonl(run_dir, filename)
 
     record_num = 0
-    num_scored_records = 0
 
     for record in records:
         record_num += 1
         logging.info("Processing record %d", record_num)
         for comment_generation in record.get("comment_generations") or []:
-            try:
-                cognitive_comp = cognitive_complexity(comment_generation["prompt_code"])
-                comment_generation["cognitive_complexity"] = cognitive_comp
-            except Exception as e:
-                logging.warning(
-                    "Error occurred while calculating cognitive complexity: %s", e
-                )
-            try:
-                cyclomatic_comp = cyclomatic_complexity(comment_generation["prompt_code"])
-                comment_generation["cyclomatic_complexity"] = cyclomatic_comp
-            except Exception as e:
-                logging.warning(
-                    "Error occurred while calculating cyclomatic complexity: %s", e
-                )
-            num_scored_records += 1
+            _add_prompt_code_metrics(comment_generation)
+            _add_comment_lengths(comment_generation)
 
     save_to_jsonl(records, run_dir, filename)
 
-    logging.info("Wrote %s.jsonl with complexity metrics", filename)
+    logging.info("Wrote %s.jsonl with code and comment metrics", filename)
 
 
 def _parse_args():
