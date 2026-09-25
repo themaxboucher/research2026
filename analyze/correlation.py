@@ -20,6 +20,8 @@ COMPLEXITY_METRICS = (
     "lines_of_code",
     "logical_lines_of_code",
     "comment_density",
+    "call_count",
+    "distinct_variable_count",
 )
 CORRELATIONS_FILENAME = "correlations.json"
 

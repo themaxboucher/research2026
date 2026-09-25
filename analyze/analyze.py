@@ -3,8 +3,10 @@ import logging
 from pathlib import Path
 
 from analyze.complexity import (
+    call_count,
     cognitive_complexity,
     cyclomatic_complexity,
+    distinct_variable_count,
     lines_of_code,
     logical_lines_of_code,
     prompt_comment_density,
@@ -19,6 +21,8 @@ PROMPT_CODE_METRICS = {
     "lines_of_code": lines_of_code,
     "logical_lines_of_code": logical_lines_of_code,
     "comment_density": prompt_comment_density,
+    "call_count": call_count,
+    "distinct_variable_count": distinct_variable_count,
 }
 
 

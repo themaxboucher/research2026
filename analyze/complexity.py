@@ -4,6 +4,8 @@ from cognitive_complexity.api import get_cognitive_complexity_for_node
 from radon.raw import analyze
 from radon.visitors import ComplexityVisitor
 
+IMPLICIT_METHOD_PARAMETERS = frozenset({"self", "cls"})
+
 STRAIGHT_LINE = '''
 def area(width, height):
     """No branches at all: the baseline for both metrics."""
@@ -349,6 +351,34 @@ def prompt_comment_density(prompt_code: str) -> float:
     placeholder_comment_line_count = 1
     comment_line_count = raw_metrics.comments - placeholder_comment_line_count
     return comment_line_count / raw_metrics.loc
+
+
+def call_count(code: str) -> int:
+    """Every function and method call written in the code, counted where it
+    appears rather than how many times it runs."""
+    return sum(isinstance(node, ast.Call) for node in ast.walk(ast.parse(code)))
+
+
+def _assigned_variable_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+        return node.id
+    if isinstance(node, ast.arg):
+        return node.arg
+    if isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)):
+        return node.name
+    return None
+
+
+def distinct_variable_count(code: str) -> int:
+    """Distinct names the code gives a value to: assignment, loop and `with`
+    targets, parameters, `except ... as`, `:=` and `match` captures. Names that
+    are only read, attributes, imports and `self`/`cls` are left out, and a name
+    reused in two functions counts once."""
+    variable_names = {
+        _assigned_variable_name(node) for node in ast.walk(ast.parse(code))
+    }
+    variable_names -= {None} | IMPLICIT_METHOD_PARAMETERS
+    return len(variable_names)
 
 
 def main():
