@@ -1,11 +1,23 @@
 from functools import lru_cache
 
-from transformers import AutoConfig, AutoTokenizer, GenerationConfig, pipeline
+from transformers import (
+    AutoConfig,
+    AutoTokenizer,
+    GenerationConfig,
+    PreTrainedTokenizerFast,
+    pipeline,
+)
 
 # Each job array task generates with exactly one model, so caching a second one
 # would only compete for GPU memory with the one actually in use.
 MAX_CACHED_MODELS = 1
 MAX_OUTPUT_TOKENS = 512
+
+# These repos name LlamaTokenizerFast as their tokenizer class, which transformers
+# 5 maps to its SentencePiece LlamaTokenizer. That replaces their byte-level BPE
+# pre-tokenizer and decoder, dropping every space and newline, so their
+# tokenizer.json has to be loaded as is.
+VERBATIM_TOKENIZER_MODELS = {"deepseek-ai/deepseek-coder-6.7b-instruct"}
 
 
 @lru_cache(maxsize=MAX_CACHED_MODELS)
@@ -20,6 +32,8 @@ def _load_text_generation_pipeline(model_name: str):
 
 @lru_cache(maxsize=None)
 def load_tokenizer(model_name: str):
+    if model_name in VERBATIM_TOKENIZER_MODELS:
+        return PreTrainedTokenizerFast.from_pretrained(model_name)
     # We only ever do chat completion. CodeLlama's tokenizer otherwise registers
     # <FILL_ME> as a special token with no embedding row, so a literal <FILL_ME>
     # in the prompt code indexes past the embedding table on the GPU.
