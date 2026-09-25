@@ -2,7 +2,6 @@ from functools import lru_cache
 
 from transformers import (
     AutoConfig,
-    AutoTokenizer,
     GenerationConfig,
     PreTrainedTokenizerFast,
     pipeline,
@@ -12,12 +11,6 @@ from transformers import (
 # would only compete for GPU memory with the one actually in use.
 MAX_CACHED_MODELS = 1
 MAX_OUTPUT_TOKENS = 512
-
-# These repos name LlamaTokenizerFast as their tokenizer class, which transformers
-# 5 maps to its SentencePiece LlamaTokenizer. That replaces their byte-level BPE
-# pre-tokenizer and decoder, dropping every space and newline, so their
-# tokenizer.json has to be loaded as is.
-VERBATIM_TOKENIZER_MODELS = {"deepseek-ai/deepseek-coder-6.7b-instruct"}
 
 
 @lru_cache(maxsize=MAX_CACHED_MODELS)
@@ -32,12 +25,16 @@ def _load_text_generation_pipeline(model_name: str):
 
 @lru_cache(maxsize=None)
 def load_tokenizer(model_name: str):
-    if model_name in VERBATIM_TOKENIZER_MODELS:
-        return PreTrainedTokenizerFast.from_pretrained(model_name)
-    # We only ever do chat completion. CodeLlama's tokenizer otherwise registers
-    # <FILL_ME> as a special token with no embedding row, so a literal <FILL_ME>
-    # in the prompt code indexes past the embedding table on the GPU.
-    return AutoTokenizer.from_pretrained(model_name, fill_token=None)
+    # AutoTokenizer in transformers 5 keeps only the vocabulary from a repo's
+    # tokenizer.json and swaps in the built-in rules of the class its config
+    # names, so load the shipped tokenizer.json as is:
+    # - DeepSeek Coder names LlamaTokenizerFast, whose SentencePiece rules drop
+    #   every space and newline from its byte-level BPE vocabulary.
+    # - CodeLlama's built-in rules skip the ▁ prefix after <s>, so every prompt
+    #   opens with [ instead of the ▁[ it was tuned on. Its built-in tokenizer
+    #   also registers <FILL_ME> as a special token with no embedding row, so a
+    #   literal <FILL_ME> in the prompt code would index past the embedding table.
+    return PreTrainedTokenizerFast.from_pretrained(model_name)
 
 
 @lru_cache(maxsize=None)
