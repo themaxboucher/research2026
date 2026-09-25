@@ -25,8 +25,6 @@ COMPLEXITY_LABELS = {
     "lines_of_code": "Lines\nof Code",
     "logical_lines_of_code": "Logical\nLines of Code",
     "comment_density": "Comment\nDensity",
-    "reference_comment_length": "Reference\nComment Length",
-    "generated_comment_length": "Generated\nComment Length",
 }
 CORRELATION_METHODS = ("pearson", "spearman")
 LABEL_AREA_WIDTH_INCHES = 2.8

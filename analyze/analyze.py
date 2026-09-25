@@ -9,7 +9,6 @@ from analyze.complexity import (
     logical_lines_of_code,
     prompt_comment_density,
 )
-from eval.normalize import normalize_comment
 from generate.constants import GENERATE_FILENAME
 from storage.jsonl import load_from_jsonl, save_to_jsonl
 from storage.runs import resolve_dataset_and_run
@@ -23,11 +22,6 @@ PROMPT_CODE_METRICS = {
 }
 
 
-def comment_word_count(comment: str) -> int:
-    """Words in the comment as the scorers see it, with `#` markers removed."""
-    return len(normalize_comment(comment).split())
-
-
 def _add_prompt_code_metrics(comment_generation: dict) -> None:
     for metric_name, compute_metric in PROMPT_CODE_METRICS.items():
         try:
@@ -36,20 +30,6 @@ def _add_prompt_code_metrics(comment_generation: dict) -> None:
             )
         except Exception as e:
             logging.warning("Error occurred while calculating %s: %s", metric_name, e)
-
-
-def _add_comment_lengths(comment_generation: dict) -> None:
-    reference_comment = comment_generation.get("comment")
-    if reference_comment is not None:
-        comment_generation["reference_comment_length"] = comment_word_count(
-            reference_comment
-        )
-
-    for result in comment_generation.get("results") or []:
-        generated_comment = result.get("comment_text")
-        if generated_comment is None:
-            continue
-        result["generated_comment_length"] = comment_word_count(generated_comment)
 
 
 def _analyze(run_dir: Path) -> None:
@@ -63,11 +43,10 @@ def _analyze(run_dir: Path) -> None:
         logging.info("Processing record %d", record_num)
         for comment_generation in record.get("comment_generations") or []:
             _add_prompt_code_metrics(comment_generation)
-            _add_comment_lengths(comment_generation)
 
     save_to_jsonl(records, run_dir, filename)
 
-    logging.info("Wrote %s.jsonl with code and comment metrics", filename)
+    logging.info("Wrote %s.jsonl with code metrics", filename)
 
 
 def _parse_args():
