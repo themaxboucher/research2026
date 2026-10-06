@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=evaluate-finalize
-#SBATCH --partition=cpu2019,cpu2021,cpu2022,cpu2019-bf05
+#SBATCH --partition=cpu2022
 #SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=256G
+#SBATCH --mem=250G
 #SBATCH --output=logs/evaluate-finalize-%j.out
 
 set -euo pipefail
