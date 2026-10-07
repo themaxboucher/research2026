@@ -50,9 +50,7 @@ def _previous_scores(run_dir: Path, records: list[dict]) -> dict[tuple, tuple[st
 
 
 def _collect_pairs(
-    records: list[dict],
-    previous_scores: dict[tuple, tuple[str, dict]],
-    models: frozenset[str] | None,
+    records: list[dict], previous_scores: dict[tuple, tuple[str, dict]]
 ) -> list[tuple[dict, str, str]]:
     pending = []
     for record in records:
@@ -71,11 +69,6 @@ def _collect_pairs(
                 if previous is not None and previous[0] == result.get("comment_text"):
                     result["scores"] = previous[1]
                     continue
-                # Excluded models keep any score reused above but are not newly
-                # scored, so a later pass that includes them scores them then.
-                if models is not None and result.get("model") not in models:
-                    result["scores"] = None
-                    continue
                 pending.append((result, prediction, reference))
     return pending
 
@@ -84,9 +77,8 @@ def score_records(
     records: list[dict],
     scorer: CommentScorer,
     previous_scores: dict[tuple, tuple[str, dict]],
-    models: frozenset[str] | None,
 ) -> int:
-    pending = _collect_pairs(records, previous_scores, models)
+    pending = _collect_pairs(records, previous_scores)
     if pending:
         predictions = [prediction for _, prediction, _ in pending]
         references = [reference for _, _, reference in pending]
@@ -98,13 +90,7 @@ def score_records(
     return len(pending)
 
 
-def _score_shard(
-    run_dir: Path,
-    task_id: int,
-    num_tasks: int,
-    force: bool,
-    models: frozenset[str] | None,
-) -> None:
+def _score_shard(run_dir: Path, task_id: int, num_tasks: int, force: bool) -> None:
     scorer = CommentScorer()
     suffix = shard_suffix(task_id, num_tasks)
 
@@ -117,7 +103,7 @@ def _score_shard(
         itertools.islice(iter_from_jsonl(run_dir, GENERATE_FILENAME), task_id, None, num_tasks)
     )
     previous_scores = {} if force else _previous_scores(run_dir, shard_records)
-    num_scored = score_records(shard_records, scorer, previous_scores, models)
+    num_scored = score_records(shard_records, scorer, previous_scores)
     # Write the full stride (scored and unusable alike) so finalize's merge
     # reconstructs every record, not just the ones scored this pass.
     save_to_jsonl(shard_records, run_dir, f"{GENERATE_FILENAME + '_scored'}.{suffix}")
@@ -172,13 +158,6 @@ def _parse_args():
         help="Rescore every result instead of reusing scores from the previous "
         f"{GENERATE_FILENAME}_scored.jsonl",
     )
-    parser.add_argument(
-        "--models",
-        type=str,
-        default=None,
-        help="Comma-separated model names to score (defaults to every model). "
-        "Other models' results are left unscored and excluded from the metrics",
-    )
     args = parser.parse_args()
     if args.task_id is None:
         raise SystemExit(
@@ -194,16 +173,11 @@ def main():
     _, run_directory = resolve_dataset_and_run(args.dataset_dir, args.run_dir)
     manifest = _valid_manifest(run_directory, args.task_id)
 
-    models = None
-    if args.models:
-        models = frozenset(model.strip() for model in args.models.split(",") if model.strip())
-
     _score_shard(
         run_directory,
         task_id=args.task_id,
         num_tasks=manifest["num_tasks"],
         force=args.force,
-        models=models,
     )
 
 

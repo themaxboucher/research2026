@@ -8,7 +8,6 @@
 #   ./submit.sh --array 3,7                 Submit only these task indices (resume)
 #   ./submit.sh --skip-setup                Reuse the existing .venv and HF cache; skip uv sync and downloads
 #   ./submit.sh --force                     Rescore results that were already scored
-#   ./submit.sh --models a,b                Newly score only these models (default: all); keeps others' existing scores
 
 set -euo pipefail
 
@@ -21,10 +20,9 @@ NUM_TASKS=""
 ARRAY_INDICES=""
 SKIP_SETUP=""
 FORCE=""
-MODELS=""
 
 usage() {
-  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -36,7 +34,6 @@ while [[ $# -gt 0 ]]; do
     --array) ARRAY_INDICES="$2"; shift 2 ;;
     --skip-setup) SKIP_SETUP=1; shift ;;
     --force) FORCE=1; shift ;;
-    --models) MODELS="$2"; shift 2 ;;
     -h|--help) usage 0 ;;
     *) echo "Unknown option: $1" >&2; usage 1 ;;
   esac
@@ -113,7 +110,7 @@ ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}"
 
 ARRAY_JOB_ID=$(sbatch --parsable \
   --array="$ARRAY_SPEC" \
-  --export=ALL,DATASET_DIR="$DATASET_DIR",RUN_DIR="$RUN_DIR",FORCE="$FORCE",MODELS="$MODELS" \
+  --export=ALL,DATASET_DIR="$DATASET_DIR",RUN_DIR="$RUN_DIR",FORCE="$FORCE" \
   eval/scripts/job.sh)
 echo "Submitted scoring array $ARRAY_JOB_ID (--array=$ARRAY_SPEC)"
 
