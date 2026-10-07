@@ -42,7 +42,7 @@ def latest_run_directory(dataset_directory: Path) -> Path:
     return latest_directory
 
 
-def _current_git_commit() -> str | None:
+def current_git_commit() -> str | None:
     """Return the current git commit hash, or None if git isn't available."""
     try:
         result = subprocess.run(
@@ -69,7 +69,7 @@ def write_manifest(
         or datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "model_profile": model_profile,
         "model_names": list(model_names),
-        "git_commit": _current_git_commit(),
+        "git_commit": current_git_commit(),
         "config": config,
     }
     run_dir.mkdir(parents=True, exist_ok=True)
