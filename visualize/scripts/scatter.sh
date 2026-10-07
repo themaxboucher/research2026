@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=scatter
+#SBATCH --partition=cpu2019,cpu2021,cpu2022,cpu2019-bf05
 #SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=64G
@@ -12,7 +13,8 @@ set -euo pipefail
 # Optional arguments are forwarded to visualize.scatter.
 cd "${SLURM_SUBMIT_DIR}"
 
-module load python/3.13
+mkdir -p logs
+
 source .venv/bin/activate
 
 python -m visualize.scatter "$@"
