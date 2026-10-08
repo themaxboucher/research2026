@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from collect.constants import DATASET_FILENAME
+from collect.filter_rules import CONTEXT_LIMIT_MODELS
 from storage import merge_jsonl_shards
 from storage.datasets import (
     MANIFEST_FILENAME,
@@ -99,7 +100,13 @@ def _finalize(dataset_directory: Path) -> None:
         )
 
     merge_jsonl_shards(dataset_directory, DATASET_FILENAME, delete_shards=True)
-    write_manifest(dataset_directory, _merged_counts(shard_manifests))
+    write_manifest(
+        dataset_directory,
+        {
+            **_merged_counts(shard_manifests),
+            "context_limit_models": CONTEXT_LIMIT_MODELS,
+        },
+    )
     for manifest_path in dataset_directory.glob(f"{MANIFEST_FILENAME}.*.json"):
         manifest_path.unlink()
 

@@ -8,6 +8,8 @@ from tqdm.auto import tqdm
 from collect.comments import get_comments_from_change
 from collect.constants import DATASET_FILENAME, RAW_DATASET_FILENAME
 from collect.filter_rules import (
+    CONTEXT_LIMIT_MODELS,
+    drop_context_overflows,
     get_target_comments,
     has_eligible_metadata,
     is_ai_authored_file,
@@ -77,11 +79,13 @@ def _filter_dataset(
         "num_files_comment_parse_error": 0,
         "num_files_no_target_comments": 0,
         "num_files_prompt_code_error": 0,
+        "num_files_context_overflow": 0,
         "num_repos": 0,
         "num_commits": 0,
         "num_files": 0,
         "num_comments": 0,
         "num_target_comments": 0,
+        "num_target_comments_context_overflow": 0,
     }
 
     counted_raw_repos: set[str] = set()
@@ -148,7 +152,15 @@ def _filter_dataset(
             manifest["num_files_prompt_code_error"] += 1
             continue
 
-        manifest["num_target_comments"] += len(target_comments)
+        fitting_target_comments = drop_context_overflows(target_comments)
+        overflowing_comment_count = len(target_comments) - len(fitting_target_comments)
+        manifest["num_target_comments_context_overflow"] += overflowing_comment_count
+        if not fitting_target_comments:
+            manifest["num_files_context_overflow"] += 1
+            continue
+
+        record["target_comments"] = fitting_target_comments
+        manifest["num_target_comments"] += len(fitting_target_comments)
         manifest["num_files"] += 1
 
         if repo_key not in counted_repos:
@@ -180,7 +192,10 @@ def _filter_dataset(
             manifest_filename,
         )
     else:
-        write_manifest(dataset_directory, manifest)
+        write_manifest(
+            dataset_directory,
+            {**manifest, "context_limit_models": CONTEXT_LIMIT_MODELS},
+        )
 
     logging.info(
         "Kept %d of %d files (%d target comments) across %d repos",

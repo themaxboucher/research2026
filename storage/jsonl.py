@@ -104,8 +104,9 @@ def drop_trailing_records(
 
 
 def rewrite_jsonl(
-    directory: Path, filename: str, rewrite_record: Callable[[dict], dict]
+    directory: Path, filename: str, rewrite_record: Callable[[dict], dict | None]
 ) -> None:
+    """Rewrite every record in place. A record rewritten to None is dropped."""
     jsonl_path = directory / f"{filename}.jsonl"
     # The rewritten file only replaces the original once it is complete, so a
     # killed rewrite leaves the original untouched. Its name does not end in
@@ -114,6 +115,8 @@ def rewrite_jsonl(
     with rewritten_path.open("w", encoding="utf-8") as rewritten_file:
         for record in iter_from_jsonl(directory, filename):
             rewritten_record = rewrite_record(record)
+            if rewritten_record is None:
+                continue
             rewritten_file.write(
                 json.dumps(rewritten_record, ensure_ascii=False) + "\n"
             )

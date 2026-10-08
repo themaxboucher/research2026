@@ -52,6 +52,26 @@ fi
 
 mkdir -p logs
 
+source .venv/bin/activate
+
+# Warm the shared HF cache from the login node with the tokenizers and configs
+# the context limit rule counts tokens with, so the offline compute nodes can
+# load them.
+python - <<'EOF'
+from dotenv import load_dotenv
+from huggingface_hub import snapshot_download
+
+from collect.filter_rules import CONTEXT_LIMIT_MODELS
+
+# HF_TOKEN from .env grants access to the gated Meta models. The path is
+# explicit because find_dotenv() can't locate a script read from stdin
+load_dotenv(".env")
+
+for model_name in CONTEXT_LIMIT_MODELS:
+    print(f"Ensuring {model_name}'s tokenizer and config are in the HF cache")
+    snapshot_download(model_name, allow_patterns=["*.json", "*.jinja"])
+EOF
+
 # Phase 1: Submit the filtering array. Each task owns a hash-partitioned share
 # of the commits and writes its own dataset and manifest shards.
 ARRAY_SPEC="${ARRAY_INDICES:-0-$((NUM_TASKS - 1))}"

@@ -19,6 +19,9 @@ mkdir -p logs
 source .venv/bin/activate
 
 export TQDM_DISABLE=1
+# The context limit rule's tokenizers and configs were pre-downloaded by
+# filter-submit.sh. The compute nodes can stay offline.
+export HF_HUB_OFFLINE=1
 
 python -m collect.filter \
   ${DATASET_DIR:+--dataset-dir "${DATASET_DIR}"} \

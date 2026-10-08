@@ -14,6 +14,11 @@ def dataset_record_key(record: dict) -> tuple[str | None, str | None, str | None
     return (record.get("repo_name"), record.get("new_path"), record.get("commit_hash"))
 
 
+def comment_key(comment: dict) -> tuple[str | None, int | None, int | None]:
+    # A file cannot hold two comments of the same type over the same line span.
+    return (comment.get("type"), comment.get("start_line"), comment.get("end_line"))
+
+
 def repair_interrupted_shard(
     run_dir: Path, suffix: str
 ) -> set[tuple[str | None, str | None, str | None]]:

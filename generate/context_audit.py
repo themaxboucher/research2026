@@ -12,6 +12,7 @@ from generate.providers.transformers import (
     MAX_OUTPUT_TOKENS,
     load_tokenizer,
     model_context_limit,
+    prompt_fits_context,
     prompt_token_count,
 )
 from storage.datasets import resolve_dataset_directory
@@ -100,26 +101,10 @@ class ModelContextTally:
         )[:count]
 
 
-def _chat_template_overhead_tokens(tokenizer) -> int:
-    return prompt_token_count(tokenizer, "")
-
-
-def _fits_without_tokenizing(
-    prompt: str, overhead_tokens: int, budget_tokens: int
-) -> bool:
-    """Decide a prompt fits without paying to tokenize it.
-
-    No token spans more than one UTF-8 byte, so a prompt whose byte length plus
-    the chat template's own tokens fits the budget cannot tokenize past it.
-    """
-    largest_possible_token_count = len(prompt.encode("utf-8")) + overhead_tokens
-    return largest_possible_token_count <= budget_tokens
-
-
 def _tally_target_comment(
     tally: ModelContextTally,
     tokenizer,
-    overhead_tokens: int,
+    reserve_tokens: int,
     record: dict,
     target_comment: dict,
 ) -> None:
@@ -128,13 +113,10 @@ def _tally_target_comment(
         return
 
     tally.comment_count += 1
-    if _fits_without_tokenizing(prompt, overhead_tokens, tally.budget_tokens):
+    if prompt_fits_context(tally.model_name, prompt, reserve_tokens):
         return
 
     prompt_tokens = prompt_token_count(tokenizer, prompt)
-    if prompt_tokens <= tally.budget_tokens:
-        return
-
     tally.overflows.append(
         ContextOverflow(
             model_name=tally.model_name,
@@ -161,13 +143,12 @@ def tally_context_overflows(
         context_limit=context_limit,
         budget_tokens=context_limit - reserve_tokens,
     )
-    overhead_tokens = _chat_template_overhead_tokens(tokenizer)
 
     dataset_records = iter_from_jsonl(dataset_directory, SOURCE_FILENAME)
     for record in tqdm(dataset_records, desc=model_name, unit=" records"):
         for target_comment in record.get("target_comments") or []:
             _tally_target_comment(
-                tally, tokenizer, overhead_tokens, record, target_comment
+                tally, tokenizer, reserve_tokens, record, target_comment
             )
     return tally
 

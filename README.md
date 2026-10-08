@@ -31,6 +31,22 @@ The filter step is a separate submission rather than part of
 job has merged the shards. It filters as a job array too followed by a dependent job
 that merges the shards and their manifests.
 
+The filter's last step drops every target comment whose prompt leaves no room
+for the output in the context of any model in the `transformers` profile, each
+counted with its own tokenizer. A dataset filtered before that step can be
+brought in line without refiltering or regenerating. Back up `dataset.jsonl`,
+`manifest.json` and each run's `generated.jsonl` / `generated_scored.jsonl` (both
+scripts rewrite them in place), then:
+
+```bash
+sbatch collect/scripts/filter-context-overflow.sh  # drop the overflows from the dataset and update its manifest
+sbatch generate/scripts/prune.sh                   # drop the run's generations for comments no longer in the dataset
+```
+
+Then rerun `eval.finalize --skip-merge` and the analyses. A pruned run is
+finished: don't resume, retry or re-finalize its generation, since its shards
+still hold the pruned comments.
+
 Generation defaults to local inference on the cluster's GPUs (the `transformers`
 backend). Pass `--profile openrouter` to route inference through the OpenRouter
 API instead — no GPU is used, but the compute nodes need outbound internet and

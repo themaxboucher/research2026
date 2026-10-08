@@ -6,18 +6,9 @@ from generate.constants import (
     GENERATE_FILENAME,
     PROGRESS_FILENAME,
 )
-from generate.shards import dataset_record_key, repair_interrupted_shard
+from generate.shards import comment_key, dataset_record_key, repair_interrupted_shard
 from storage.jsonl import iter_from_jsonl, merge_jsonl_shards, save_to_jsonl
 from storage.runs import resolve_dataset_and_run
-
-
-def _comment_key(comment_generation: dict) -> tuple[str | None, int | None, int | None]:
-    # A file cannot hold two comments of the same type over the same line span.
-    return (
-        comment_generation.get("type"),
-        comment_generation.get("start_line"),
-        comment_generation.get("end_line"),
-    )
 
 
 def _regrouped_generation_records(run_dir: Path, shard_paths: list[Path]) -> list[dict]:
@@ -43,8 +34,8 @@ def _regrouped_generation_records(run_dir: Path, shard_paths: list[Path]) -> lis
 
             comment_index = comment_indexes[record_key]
             for comment_generation in record.get("comment_generations") or []:
-                comment_key = _comment_key(comment_generation)
-                regrouped_generation = comment_index.get(comment_key)
+                generation_comment_key = comment_key(comment_generation)
+                regrouped_generation = comment_index.get(generation_comment_key)
 
                 # The first model to reach a comment brings the fields
                 # shared across models (the prompt, the reference comment,
@@ -54,7 +45,7 @@ def _regrouped_generation_records(run_dir: Path, shard_paths: list[Path]) -> lis
                     regrouped_generation["results"] = list(
                         comment_generation.get("results") or []
                     )
-                    comment_index[comment_key] = regrouped_generation
+                    comment_index[generation_comment_key] = regrouped_generation
                     regrouped_record["comment_generations"].append(regrouped_generation)
                 else:
                     regrouped_generation["results"].extend(

@@ -56,6 +56,30 @@ def prompt_token_count(tokenizer, prompt: str) -> int:
     )
 
 
+@lru_cache(maxsize=None)
+def _chat_template_overhead_tokens(model_name: str) -> int:
+    return prompt_token_count(load_tokenizer(model_name), "")
+
+
+def prompt_fits_context(
+    model_name: str, prompt: str, reserve_tokens: int = MAX_OUTPUT_TOKENS
+) -> bool:
+    """Whether the prompt leaves room for `reserve_tokens` of output in the
+    model's context.
+
+    Every token covers at least one UTF-8 byte, so a prompt whose byte length plus
+    the chat template's own tokens fits the budget cannot tokenize past it, and
+    is let through without paying to tokenize it.
+    """
+    budget_tokens = model_context_limit(model_name) - reserve_tokens
+    prompt_bytes = len(prompt.encode("utf-8"))
+    overhead_tokens = _chat_template_overhead_tokens(model_name)
+    if prompt_bytes + overhead_tokens <= budget_tokens:
+        return True
+
+    return prompt_token_count(load_tokenizer(model_name), prompt) <= budget_tokens
+
+
 def _raise_if_exceeds_context(text_generation_pipeline, prompt: str) -> None:
     context_limit = text_generation_pipeline.model.config.max_position_embeddings
     prompt_tokens = prompt_token_count(text_generation_pipeline.tokenizer, prompt)
