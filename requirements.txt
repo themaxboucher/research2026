@@ -4,6 +4,8 @@ accelerate==1.13.0
     # via research2026 (pyproject.toml)
 bert-score==0.3.13
     # via research2026 (pyproject.toml)
+cognitive-complexity==1.3.0
+    # via research2026 (pyproject.toml)
 evaluate==0.4.6
     # via research2026 (pyproject.toml)
 matplotlib==3.10.9
@@ -16,6 +18,8 @@ pydriller==2.9
     # via research2026 (pyproject.toml)
 python-dotenv==1.2.2
     # via research2026 (pyproject.toml)
+radon==6.0.1
+    # via research2026 (pyproject.toml)
 requests==2.34.2
     # via research2026 (pyproject.toml)
 rouge-score==0.1.2
@@ -23,6 +27,8 @@ rouge-score==0.1.2
 scipy==1.18.1
     # via research2026 (pyproject.toml)
 tiktoken==0.13.0
+    # via research2026 (pyproject.toml)
+torch==2.14.1
     # via research2026 (pyproject.toml)
 tqdm==4.67.3
     # via research2026 (pyproject.toml)
