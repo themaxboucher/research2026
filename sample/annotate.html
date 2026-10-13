@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comment Failure Review</title>
+<link rel="stylesheet" media="(prefers-color-scheme: light)" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+<link rel="stylesheet" media="(prefers-color-scheme: dark)" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --panel: #ffffff;
+    --text: #1d1d1b;
+    --muted: #6b6b66;
+    --border: #e2e1dc;
+    --accent: #2f5fd0;
+    --accent-soft: #e6edfb;
+    --mark: #fff3c4;
+    --ok: #237a43;
+    --warn: #b0451c;
+    --code-bg: #fbfbfa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161615;
+      --panel: #1f1f1d;
+      --text: #ecebe6;
+      --muted: #9b9a93;
+      --border: #34332f;
+      --accent: #7ea3ff;
+      --accent-soft: #24304d;
+      --mark: #4a3f12;
+      --ok: #6cc58c;
+      --warn: #f08a5d;
+      --code-bg: #1a1a18;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161615;
+    --panel: #1f1f1d;
+    --text: #ecebe6;
+    --muted: #9b9a93;
+    --border: #34332f;
+    --accent: #7ea3ff;
+    --accent-soft: #24304d;
+    --mark: #4a3f12;
+    --ok: #6cc58c;
+    --warn: #f08a5d;
+    --code-bg: #1a1a18;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+  aside {
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  main { padding: 16px 24px 48px; max-width: 1100px; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 20px 0 8px;
+  }
+  .muted { color: var(--muted); }
+  .progress-bar {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 8px 0 4px;
+  }
+  .progress-bar div { height: 100%; background: var(--ok); width: 0; }
+  .filter-list { list-style: none; margin: 0; padding: 0; }
+  .filter-list button {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .filter-list button:hover { background: var(--accent-soft); }
+  .filter-list button.active { background: var(--accent); color: var(--panel); }
+  .filter-list .count { opacity: 0.7; font-variant-numeric: tabular-nums; }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .toolbar .spacer { flex: 1; }
+  button.btn {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font: inherit;
+    cursor: pointer;
+  }
+  button.btn:hover { border-color: var(--accent); }
+  button.btn:disabled { opacity: 0.4; cursor: default; }
+  .save-status { font-size: 12px; color: var(--muted); }
+  .save-status.error { color: var(--warn); }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
+  .meta a { color: var(--accent); word-break: break-all; }
+  .pill {
+    display: inline-block;
+    font-size: 12px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+  }
+  .comments { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .comments h3 { font-size: 12px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .comment-text { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; }
+  .code-view {
+    background: var(--code-bg);
+    border-radius: 6px;
+    overflow-x: auto;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .code-view table { border-collapse: collapse; width: 100%; }
+  .code-view td {
+    padding: 0 10px;
+    font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre;
+    vertical-align: top;
+  }
+  .code-view td.line-number {
+    color: var(--muted);
+    text-align: right;
+    user-select: none;
+    width: 1%;
+    border-right: 1px solid var(--border);
+  }
+  .code-view tr.target td { background: var(--mark); }
+  .code-view .hljs { background: transparent; padding: 0; }
+  .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .segmented button {
+    background: var(--panel);
+    color: var(--text);
+    border: 0;
+    padding: 3px 10px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .segmented button.active { background: var(--accent); color: var(--panel); }
+  .blinded { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+  .scores { display: flex; flex-wrap: wrap; gap: 4px 14px; font-variant-numeric: tabular-nums; }
+  .tag-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .tag-chip {
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .tag-chip.selected { background: var(--accent); border-color: var(--accent); color: var(--panel); }
+  input[type="text"], textarea {
+    width: 100%;
+    background: var(--code-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  input[type="text"]:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .done-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-weight: 600; }
+  details summary { cursor: pointer; color: var(--muted); }
+  .shortcuts { font-size: 12px; color: var(--muted); line-height: 1.8; }
+  kbd {
+    font: 11px ui-monospace, monospace;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0 4px;
+    background: var(--panel);
+  }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+    main { padding: 16px; }
+    .comments { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <h1>Comment failure review</h1>
+    <div class="muted" id="sample-name"></div>
+    <div class="progress-bar"><div id="progress-fill"></div></div>
+    <div class="muted" id="progress-text"></div>
+
+    <h2>Show</h2>
+    <ul class="filter-list" id="status-filters"></ul>
+
+    <h2>Tags</h2>
+    <ul class="filter-list" id="tag-filters"></ul>
+    <div class="muted" id="no-tags">No tags yet.</div>
+
+    <h2>Shortcuts</h2>
+    <div class="shortcuts">
+      <kbd>j</kbd>/<kbd>k</kbd> next / previous<br>
+      <kbd>n</kbd> next not done<br>
+      <kbd>d</kbd> toggle done<br>
+      <kbd>r</kbd> reveal model &amp; scores<br>
+      <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> placeholder / reference / prediction<br>
+      <kbd>t</kbd> add tag &nbsp; <kbd>e</kbd> edit notes<br>
+      <kbd>Esc</kbd> leave a text field
+    </div>
+  </aside>
+
+  <main id="main">
+    <div class="empty">Loading sample…</div>
+  </main>
+</div>
+
+<template id="item-template">
+  <div class="toolbar">
+    <button class="btn" data-action="prev">← Prev</button>
+    <span data-field="position"></span>
+    <button class="btn" data-action="next">Next →</button>
+    <button class="btn" data-action="next-todo">Next not done</button>
+    <span class="spacer"></span>
+    <span class="save-status" data-field="save-status"></span>
+  </div>
+
+  <div class="card meta">
+    <a data-field="source-link" target="_blank" rel="noopener noreferrer"></a>
+    <span class="pill" data-field="comment-type"></span>
+    <span class="pill" data-field="comment-status"></span>
+    <span class="muted" data-field="lines"></span>
+  </div>
+
+  <div class="card blinded">
+    <div data-field="blind-hidden">
+      <span class="muted">Model and scores hidden.</span>
+      <button class="btn" data-action="reveal">Reveal (r)</button>
+    </div>
+    <div data-field="blind-shown" hidden>
+      <div><strong data-field="model"></strong></div>
+      <div class="scores" data-field="scores"></div>
+    </div>
+  </div>
+
+  <div class="card comments">
+    <div>
+      <h3>Reference (human)</h3>
+      <pre class="comment-text" data-field="reference"></pre>
+    </div>
+    <div>
+      <h3>Prediction (model)</h3>
+      <pre class="comment-text" data-field="prediction"></pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <strong>Code</strong>
+      <div class="segmented" data-field="code-modes">
+        <button data-mode="placeholder">Placeholder</button>
+        <button data-mode="reference">Reference</button>
+        <button data-mode="prediction">Prediction</button>
+      </div>
+    </div>
+    <div class="code-view" data-field="code"></div>
+    <details style="margin-top: 10px">
+      <summary>Raw model response</summary>
+      <pre class="comment-text" data-field="raw-response" style="margin-top: 6px"></pre>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top: 0">Failure modes</h2>
+    <div class="tag-chips" data-field="tag-chips"></div>
+    <input type="text" data-field="tag-input" list="tag-options" placeholder="Add a tag and press Enter (t)">
+    <datalist id="tag-options"></datalist>
+    <h2>Notes</h2>
+    <textarea data-field="notes" placeholder="What went wrong? (e)"></textarea>
+    <label class="done-row">
+      <input type="checkbox" data-field="done"> Done (d)
+    </label>
+  </div>
+</template>
+
+<script>
+  const PLACEHOLDER = "# Add the comment here";
+  const SAVE_DELAY_MS = 1200;
+
+  const state = {
+    items: [],
+    annotations: {},
+    filter: { kind: "all", tag: null },
+    view: [],
+    position: 0,
+    codeMode: "placeholder",
+    draft: null,
+    dirty: false,
+    saveTimer: null,
+    saveStatus: "",
+    saveError: false,
+  };
+
+  const main = document.getElementById("main");
+
+  function emptyAnnotation(id) {
+    return { id, tags: [], notes: "", done: false, revealed: false };
+  }
+
+  function annotationFor(id) {
+    if (state.draft && state.draft.id === id) return state.draft;
+    return state.annotations[id] || emptyAnnotation(id);
+  }
+
+  function currentItem() {
+    return state.items[state.view[state.position]];
+  }
+
+  function normalizeTag(tag) {
+    return tag.trim().toLowerCase().split(/\s+/).filter(Boolean).join("-");
+  }
+
+  // ---------- Saving ----------
+
+  function scheduleSave() {
+    state.dirty = true;
+    setSaveStatus("Unsaved changes");
+    clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);
+  }
+
+  async function flushSave() {
+    clearTimeout(state.saveTimer);
+    if (!state.dirty || !state.draft) return;
+    const snapshot = structuredClone(state.draft);
+    state.dirty = false;
+    // Stored locally first, so coming back to the item before the request
+    // finishes shows what was typed rather than the older saved version.
+    state.annotations[snapshot.id] = snapshot;
+    setSaveStatus("Saving…");
+    try {
+      const response = await fetch("/api/annotations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snapshot),
+      });
+      if (!response.ok) throw new Error((await response.json()).error || response.statusText);
+      const saved = await response.json();
+      state.annotations[saved.id] = saved;
+      if (state.draft && state.draft.id === saved.id && !state.dirty) {
+        state.draft = structuredClone(saved);
+      }
+      setSaveStatus("Saved");
+    } catch (error) {
+      if (!state.draft || state.draft.id === snapshot.id) state.dirty = true;
+      setSaveStatus(`Save failed (${error.message}), retrying`, true);
+      state.saveTimer = setTimeout(flushSave, SAVE_DELAY_MS * 3);
+    }
+    renderSidebar();
+  }
+
+  function setSaveStatus(text, isError = false) {
+    state.saveStatus = text;
+    state.saveError = isError;
+    const element = main.querySelector('[data-field="save-status"]');
+    if (!element) return;
+    element.textContent = text;
+    element.classList.toggle("error", isError);
+  }
+
+  window.addEventListener("beforeunload", () => {
+    if (state.dirty && state.draft) {
+      const body = new Blob([JSON.stringify(state.draft)], { type: "application/json" });
+      navigator.sendBeacon("/api/annotations", body);
+    }
+  });
+
+  function updateDraft(changes) {
+    Object.assign(state.draft, changes);
+    scheduleSave();
+  }
+
+  // ---------- Filtering and navigation ----------
+
+  function matchesFilter(item) {
+    const annotation = annotationFor(item.id);
+    if (state.filter.kind === "todo") return !annotation.done;
+    if (state.filter.kind === "done") return annotation.done;
+    if (state.filter.kind === "tag") return annotation.tags.includes(state.filter.tag);
+    if (state.filter.kind === "untagged") return annotation.tags.length === 0;
+    return true;
+  }
+
+  function setFilter(filter) {
+    const currentId = currentItem()?.id;
+    state.filter = filter;
+    state.view = state.items.map((_, index) => index).filter((index) => matchesFilter(state.items[index]));
+    const keptPosition = state.view.findIndex((index) => state.items[index].id === currentId);
+    goTo(keptPosition >= 0 ? keptPosition : 0);
+  }
+
+  function goTo(position) {
+    flushSave();
+    state.position = Math.max(0, Math.min(position, state.view.length - 1));
+    const item = currentItem();
+    state.draft = item ? structuredClone(annotationFor(item.id)) : null;
+    state.codeMode = "placeholder";
+    if (item) history.replaceState(null, "", `#${item.id}`);
+    render();
+  }
+
+  function goToNextTodo() {
+    const start = state.view[state.position] ?? -1;
+    for (let offset = 1; offset <= state.items.length; offset++) {
+      const index = (start + offset) % state.items.length;
+      if (!annotationFor(state.items[index].id).done) {
+        if (!state.view.includes(index)) setFilter({ kind: "all", tag: null });
+        goTo(state.view.indexOf(index));
+        return;
+      }
+    }
+    setSaveStatus("Every item is done");
+  }
+
+  // ---------- Code rendering ----------
+
+  function commentLines(comment) {
+    return (comment || "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => (line.startsWith("#") ? line : `# ${line}`));
+  }
+
+  // Returns the code with the placeholder swapped for `comment`, and the
+  // 0-based line range the comment occupies, so it can be highlighted.
+  function codeWithComment(code, comment, commentType) {
+    const lines = (code || "").split("\n");
+    const index = lines.findIndex((line) => line.includes(PLACEHOLDER));
+    if (index === -1) return { lines, first: -1, last: -1 };
+    if (comment === null) return { lines, first: index, last: index };
+
+    const replacement = commentLines(comment);
+    if (replacement.length === 0) return { lines, first: index, last: index };
+    if (commentType === "inline") {
+      const inlineText = "# " + replacement.map((line) => line.replace(/^#+\s?/, "")).join(" ");
+      lines[index] = lines[index].replace(PLACEHOLDER, inlineText);
+      return { lines, first: index, last: index };
+    }
+    const indent = lines[index].match(/^\s*/)[0];
+    lines.splice(index, 1, ...replacement.map((line) => indent + line));
+    return { lines, first: index, last: index + replacement.length - 1 };
+  }
+
+  function escapeHtml(text) {
+    return text.replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    })[character]);
+  }
+
+  // Highlights the whole snippet at once so multi-line strings are coloured
+  // correctly, then splits it into lines, closing and reopening any spans
+  // that cross a line break.
+  function highlightedLines(code) {
+    const html = window.hljs
+      ? hljs.highlight(code, { language: "python", ignoreIllegals: true }).value
+      : escapeHtml(code);
+    const openSpans = [];
+    return html.split("\n").map((line) => {
+      const prefix = openSpans.join("");
+      for (const match of line.matchAll(/<span[^>]*>|<\/span>/g)) {
+        if (match[0] === "</span>") openSpans.pop();
+        else openSpans.push(match[0]);
+      }
+      return prefix + line + "</span>".repeat(openSpans.length);
+    });
+  }
+
+  function renderCode(item) {
+    const comment = {
+      placeholder: null,
+      reference: item.reference_comment,
+      prediction: item.comment_text,
+    }[state.codeMode];
+    const { lines, first, last } = codeWithComment(item.prompt_code, comment, item.type);
+    const htmlLines = highlightedLines(lines.join("\n"));
+    const rows = htmlLines.map((lineHtml, index) => {
+      const target = index >= first && index <= last ? ' class="target"' : "";
+      return `<tr${target}><td class="line-number">${index + 1}</td><td class="hljs">${lineHtml}</td></tr>`;
+    });
+    const container = main.querySelector('[data-field="code"]');
+    container.innerHTML = `<table>${rows.join("")}</table>`;
+    // Scrolls the code box only, so the page itself stays at the top.
+    const targetRow = container.querySelector("tr.target");
+    if (targetRow) container.scrollTop = targetRow.offsetTop - container.clientHeight / 2;
+    main.querySelectorAll("[data-mode]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.mode === state.codeMode);
+    });
+  }
+
+  // ---------- Rendering ----------
+
+  function tagCounts() {
+    const counts = new Map();
+    for (const item of state.items) {
+      for (const tag of annotationFor(item.id).tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }
+
+  function filterButton(label, count, filter) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    const active = state.filter.kind === filter.kind && state.filter.tag === filter.tag;
+    button.className = active ? "active" : "";
+    const name = document.createElement("span");
+    name.textContent = label;
+    const number = document.createElement("span");
+    number.className = "count";
+    number.textContent = count;
+    button.append(name, number);
+    button.addEventListener("click", () => setFilter(filter));
+    item.append(button);
+    return item;
+  }
+
+  function renderSidebar() {
+    const total = state.items.length;
+    const annotations = state.items.map((item) => annotationFor(item.id));
+    const doneCount = annotations.filter((annotation) => annotation.done).length;
+    const untaggedCount = annotations.filter((annotation) => annotation.tags.length === 0).length;
+    document.getElementById("progress-fill").style.width = total ? `${(100 * doneCount) / total}%` : "0";
+    document.getElementById("progress-text").textContent = `${doneCount} of ${total} done`;
+
+    document.getElementById("status-filters").replaceChildren(
+      filterButton("All", total, { kind: "all", tag: null }),
+      filterButton("Not done", total - doneCount, { kind: "todo", tag: null }),
+      filterButton("Done", doneCount, { kind: "done", tag: null }),
+      filterButton("Untagged", untaggedCount, { kind: "untagged", tag: null }),
+    );
+
+    const counts = tagCounts();
+    document.getElementById("tag-filters").replaceChildren(
+      ...counts.map(([tag, count]) => filterButton(tag, count, { kind: "tag", tag })),
+    );
+    document.getElementById("no-tags").hidden = counts.length > 0;
+    document.getElementById("tag-options")?.replaceChildren(
+      ...counts.map(([tag]) => Object.assign(document.createElement("option"), { value: tag })),
+    );
+  }
+
+  function field(name) {
+    return main.querySelector(`[data-field="${name}"]`);
+  }
+
+  function renderTagChips() {
+    const selected = new Set(state.draft.tags);
+    const allTags = [...new Set([...tagCounts().map(([tag]) => tag), ...state.draft.tags])];
+    field("tag-chips").replaceChildren(
+      ...allTags.map((tag) => {
+        const chip = document.createElement("button");
+        chip.className = "tag-chip" + (selected.has(tag) ? " selected" : "");
+        chip.textContent = tag;
+        chip.addEventListener("click", () => toggleTag(tag));
+        return chip;
+      }),
+    );
+  }
+
+  function toggleTag(tag) {
+    const tags = state.draft.tags.includes(tag)
+      ? state.draft.tags.filter((existing) => existing !== tag)
+      : [...state.draft.tags, tag];
+    updateDraft({ tags });
+    renderTagChips();
+    renderSidebar();
+  }
+
+  function renderBlinding(item) {
+    const revealed = state.draft.revealed;
+    field("blind-hidden").hidden = revealed;
+    field("blind-shown").hidden = !revealed;
+    if (!revealed) return;
+    field("model").textContent = item.model;
+    field("scores").replaceChildren(
+      ...Object.entries(item.scores || {}).map(([metric, value]) => {
+        const score = document.createElement("span");
+        const isRankingMetric = metric === item.metric;
+        score.textContent = `${metric}: ${typeof value === "number" ? value.toFixed(3) : value}`;
+        if (isRankingMetric) score.style.fontWeight = "700";
+        return score;
+      }),
+    );
+  }
+
+  function githubLink(item) {
+    const lines = item.start_line === item.end_line
+      ? `L${item.start_line}`
+      : `L${item.start_line}-L${item.end_line}`;
+    return `https://github.com/${item.repo_name}/blob/${item.commit_hash}/${item.new_path}#${lines}`;
+  }
+
+  function render() {
+    renderSidebar();
+    const item = currentItem();
+    if (!item) {
+      main.innerHTML = '<div class="empty">No items match this filter.</div>';
+      return;
+    }
+    main.replaceChildren(document.getElementById("item-template").content.cloneNode(true));
+
+    field("position").textContent = `${state.position + 1} / ${state.view.length}`;
+    main.querySelector('[data-action="prev"]').disabled = state.position === 0;
+    main.querySelector('[data-action="next"]').disabled = state.position >= state.view.length - 1;
+    setSaveStatus(state.saveStatus, state.saveError);
+
+    const link = field("source-link");
+    link.href = githubLink(item);
+    link.textContent = `${item.repo_name} / ${item.new_path}`;
+    field("comment-type").textContent = item.type;
+    field("comment-status").textContent = item.status;
+    field("lines").textContent = item.start_line === item.end_line
+      ? `line ${item.start_line}`
+      : `lines ${item.start_line}–${item.end_line}`;
+
+    field("reference").textContent = item.reference_comment ?? "";
+    field("prediction").textContent = item.comment_text ?? "";
+    field("raw-response").textContent = item.raw_response ?? "";
+
+    renderBlinding(item);
+    renderCode(item);
+    renderTagChips();
+
+    const notes = field("notes");
+    notes.value = state.draft.notes;
+    notes.addEventListener("input", () => updateDraft({ notes: notes.value }));
+
+    const done = field("done");
+    done.checked = state.draft.done;
+    done.addEventListener("change", () => {
+      updateDraft({ done: done.checked });
+      renderSidebar();
+    });
+
+    const tagInput = field("tag-input");
+    tagInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const tag = normalizeTag(tagInput.value);
+      tagInput.value = "";
+      if (tag && !state.draft.tags.includes(tag)) toggleTag(tag);
+    });
+
+    main.querySelector('[data-action="prev"]').addEventListener("click", () => goTo(state.position - 1));
+    main.querySelector('[data-action="next"]').addEventListener("click", () => goTo(state.position + 1));
+    main.querySelector('[data-action="next-todo"]').addEventListener("click", goToNextTodo);
+    main.querySelector('[data-action="reveal"]').addEventListener("click", reveal);
+    main.querySelectorAll("[data-mode]").forEach((button) => {
+      button.addEventListener("click", () => setCodeMode(button.dataset.mode));
+    });
+  }
+
+  function reveal() {
+    if (state.draft.revealed) return;
+    updateDraft({ revealed: true });
+    renderBlinding(currentItem());
+  }
+
+  function setCodeMode(mode) {
+    state.codeMode = mode;
+    renderCode(currentItem());
+  }
+
+  // ---------- Keyboard ----------
+
+  document.addEventListener("keydown", (event) => {
+    const target = event.target;
+    const typing = target.matches("input[type=text], textarea");
+    if (event.key === "Escape" && typing) {
+      target.blur();
+      return;
+    }
+    if (typing || event.metaKey || event.ctrlKey || event.altKey || !currentItem()) return;
+
+    const actions = {
+      j: () => goTo(state.position + 1),
+      ArrowRight: () => goTo(state.position + 1),
+      k: () => goTo(state.position - 1),
+      ArrowLeft: () => goTo(state.position - 1),
+      n: goToNextTodo,
+      d: () => {
+        const done = field("done");
+        done.checked = !done.checked;
+        done.dispatchEvent(new Event("change"));
+      },
+      r: reveal,
+      1: () => setCodeMode("placeholder"),
+      2: () => setCodeMode("reference"),
+      3: () => setCodeMode("prediction"),
+      t: () => field("tag-input").focus(),
+      e: () => field("notes").focus(),
+    };
+    const action = actions[event.key];
+    if (!action) return;
+    event.preventDefault();
+    action();
+  });
+
+  // ---------- Startup ----------
+
+  async function load() {
+    const response = await fetch("/api/items");
+    const data = await response.json();
+    state.items = data.items;
+    state.annotations = data.annotations;
+    const sampleName = data.sample_dir.split("/").slice(-1)[0];
+    const manifest = data.manifest || {};
+    document.getElementById("sample-name").textContent =
+      `Sample ${sampleName}` + (manifest.metric ? ` · bottom ${Math.round(manifest.fraction * 100)}% ${manifest.metric}` : "");
+
+    state.view = state.items.map((_, index) => index);
+    const hashId = location.hash.slice(1);
+    const hashIndex = state.items.findIndex((item) => item.id === hashId);
+    const firstTodo = state.items.findIndex((item) => !annotationFor(item.id).done);
+    goTo(hashIndex >= 0 ? hashIndex : Math.max(firstTodo, 0));
+  }
+
+  load().catch((error) => {
+    main.innerHTML = "";
+    const message = document.createElement("div");
+    message.className = "empty";
+    message.textContent = `Could not load the sample: ${error.message}`;
+    main.append(message);
+  });
+</script>
+</body>
+</html>
