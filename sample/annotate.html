@@ -143,7 +143,16 @@
     background: var(--accent-soft);
   }
   .comments { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .comments h3 { font-size: 12px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  .card h3 { font-size: 12px; margin: 0; color: var(--muted); font-weight: 600; }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  button.btn.btn-small { font-size: 12px; padding: 1px 8px; }
+  .prompt-view { max-height: 40vh; overflow-y: auto; }
   pre {
     margin: 0;
     white-space: pre-wrap;
@@ -253,6 +262,8 @@
       <kbd>r</kbd> reveal model &amp; scores<br>
       <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> placeholder / reference / prediction<br>
       <kbd>t</kbd> add tag &nbsp; <kbd>e</kbd> edit notes<br>
+      <kbd>c</kbd> copy for review<br>
+      <kbd>⌘S</kbd> save notes &amp; tags<br>
       <kbd>Esc</kbd> leave a text field
     </div>
   </aside>
@@ -268,6 +279,7 @@
     <span data-field="position"></span>
     <button class="btn" data-action="next">Next →</button>
     <button class="btn" data-action="next-todo">Next not done</button>
+    <button class="btn" data-action="copy-review">Copy for review (c)</button>
     <span class="spacer"></span>
     <span class="save-status" data-field="save-status"></span>
   </div>
@@ -290,13 +302,24 @@
     </div>
   </div>
 
+  <div class="card">
+    <div class="card-header"><h3>Prompt</h3></div>
+    <pre class="comment-text prompt-view" data-field="prompt"></pre>
+  </div>
+
   <div class="card comments">
     <div>
-      <h3>Reference (human)</h3>
+      <div class="card-header">
+        <h3>Reference (human)</h3>
+        <button class="btn btn-small" data-copy="reference">Copy</button>
+      </div>
       <pre class="comment-text" data-field="reference"></pre>
     </div>
     <div>
-      <h3>Prediction (model)</h3>
+      <div class="card-header">
+        <h3>Prediction (model)</h3>
+        <button class="btn btn-small" data-copy="prediction">Copy</button>
+      </div>
       <pre class="comment-text" data-field="prediction"></pre>
     </div>
   </div>
@@ -323,7 +346,7 @@
     <input type="text" data-field="tag-input" list="tag-options" placeholder="Add a tag and press Enter (t)">
     <datalist id="tag-options"></datalist>
     <h2>Notes</h2>
-    <textarea data-field="notes" placeholder="What went wrong? (e)"></textarea>
+    <textarea data-field="notes" placeholder="What went wrong? (e, ⌘S to save)"></textarea>
     <label class="done-row">
       <input type="checkbox" data-field="done"> Done (d)
     </label>
@@ -332,7 +355,9 @@
 
 <script>
   const PLACEHOLDER = "# Add the comment here";
-  const SAVE_DELAY_MS = 1200;
+  const MISSING_PROMPT = "This sample has no prompts. Re-run python -m sample.sample to include them.";
+  const UNSAVED_STATUS = "Unsaved — ⌘S to save";
+  const COPIED_FEEDBACK_MS = 1500;
 
   const state = {
     items: [],
@@ -343,7 +368,6 @@
     codeMode: "placeholder",
     draft: null,
     dirty: false,
-    saveTimer: null,
     saveStatus: "",
     saveError: false,
   };
@@ -369,15 +393,7 @@
 
   // ---------- Saving ----------
 
-  function scheduleSave() {
-    state.dirty = true;
-    setSaveStatus("Unsaved changes");
-    clearTimeout(state.saveTimer);
-    state.saveTimer = setTimeout(flushSave, SAVE_DELAY_MS);
-  }
-
   async function flushSave() {
-    clearTimeout(state.saveTimer);
     if (!state.dirty || !state.draft) return;
     const snapshot = structuredClone(state.draft);
     state.dirty = false;
@@ -397,11 +413,11 @@
       if (state.draft && state.draft.id === saved.id && !state.dirty) {
         state.draft = structuredClone(saved);
       }
-      setSaveStatus("Saved");
+      // Notes typed while the request was in flight are still unsaved.
+      setSaveStatus(state.dirty ? UNSAVED_STATUS : "Saved");
     } catch (error) {
       if (!state.draft || state.draft.id === snapshot.id) state.dirty = true;
-      setSaveStatus(`Save failed (${error.message}), retrying`, true);
-      state.saveTimer = setTimeout(flushSave, SAVE_DELAY_MS * 3);
+      setSaveStatus(`Save failed (${error.message}) — ⌘S to retry`, true);
     }
     renderSidebar();
   }
@@ -415,16 +431,37 @@
     element.classList.toggle("error", isError);
   }
 
-  window.addEventListener("beforeunload", () => {
-    if (state.dirty && state.draft) {
-      const body = new Blob([JSON.stringify(state.draft)], { type: "application/json" });
-      navigator.sendBeacon("/api/annotations", body);
-    }
+  window.addEventListener("beforeunload", (event) => {
+    if (!state.dirty) return;
+    event.preventDefault();
+    event.returnValue = "";
   });
 
+  // Typed notes stay unsaved until ⌘S or moving to another item.
   function updateDraft(changes) {
     Object.assign(state.draft, changes);
-    scheduleSave();
+    state.dirty = true;
+    setSaveStatus(UNSAVED_STATUS);
+  }
+
+  // Clicks (tags, done, reveal) are saved at once so the sidebar counts and
+  // the annotation log never disagree.
+  function saveDraft(changes) {
+    updateDraft(changes);
+    flushSave();
+  }
+
+  function commitTagInput() {
+    const tagInput = field("tag-input");
+    const tag = normalizeTag(tagInput.value);
+    tagInput.value = "";
+    if (tag && !state.draft.tags.includes(tag)) toggleTag(tag);
+  }
+
+  function saveNow() {
+    if (!currentItem()) return;
+    commitTagInput();
+    flushSave();
   }
 
   // ---------- Filtering and navigation ----------
@@ -618,7 +655,7 @@
     const tags = state.draft.tags.includes(tag)
       ? state.draft.tags.filter((existing) => existing !== tag)
       : [...state.draft.tags, tag];
-    updateDraft({ tags });
+    saveDraft({ tags });
     renderTagChips();
     renderSidebar();
   }
@@ -640,11 +677,84 @@
     );
   }
 
-  function githubLink(item) {
-    const lines = item.start_line === item.end_line
+  function lineAnchor(item) {
+    return item.start_line === item.end_line
       ? `L${item.start_line}`
       : `L${item.start_line}-L${item.end_line}`;
-    return `https://github.com/${item.repo_name}/blob/${item.commit_hash}/${item.new_path}#${lines}`;
+  }
+
+  function githubLink(item) {
+    return `https://github.com/${item.repo_name}/blob/${item.commit_hash}/${item.new_path}#${lineAnchor(item)}`;
+  }
+
+  // ---------- Copying ----------
+
+  function itemTitle(item) {
+    return `${item.repo_name} / ${item.new_path} ${lineAnchor(item)}`;
+  }
+
+  // The prompt contains its own ``` fences, so the outer fence must be longer
+  // than any backtick run inside the text.
+  function fenced(text, language = "") {
+    const longestRun = Math.max(0, ...(text.match(/`+/g) || []).map((run) => run.length));
+    const fence = "`".repeat(Math.max(3, longestRun + 1));
+    return `${fence}${language}\n${text}\n${fence}`;
+  }
+
+  function reviewMarkdown(item) {
+    return [
+      `# ${itemTitle(item)}`,
+      [
+        `- Type: ${item.type}`,
+        `- Status: ${item.status}`,
+        `- Source: ${githubLink(item)}`,
+      ].join("\n"),
+      "## Prompt",
+      fenced(item.prompt ?? MISSING_PROMPT, "text"),
+      "## Reference (human)",
+      fenced(item.reference_comment ?? "", "python"),
+      "## Prediction (model)",
+      fenced(item.comment_text ?? "", "python"),
+    ].join("\n\n") + "\n";
+  }
+
+  function commentCopyText(item, kind) {
+    const [label, text] = kind === "reference"
+      ? ["Reference", item.reference_comment]
+      : ["Prediction", item.comment_text];
+    return `${itemTitle(item)} — ${label}\n${text ?? ""}\n`;
+  }
+
+  // Some browsers refuse the async clipboard API, so this falls back to the
+  // older selection-based copy.
+  function copyWithSelection(text) {
+    const scratch = document.createElement("textarea");
+    scratch.value = text;
+    scratch.style.position = "fixed";
+    scratch.style.opacity = "0";
+    document.body.append(scratch);
+    scratch.select();
+    const copied = document.execCommand("copy");
+    scratch.remove();
+    return copied;
+  }
+
+  async function copyText(text, button) {
+    const label = button.textContent;
+    let copied;
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch (error) {
+      copied = copyWithSelection(text);
+    }
+    button.textContent = copied ? "Copied" : "Copy failed";
+    setTimeout(() => { button.textContent = label; }, COPIED_FEEDBACK_MS);
+  }
+
+  function copyReview() {
+    const button = main.querySelector('[data-action="copy-review"]');
+    copyText(reviewMarkdown(currentItem()), button);
   }
 
   function render() {
@@ -670,6 +780,7 @@
       ? `line ${item.start_line}`
       : `lines ${item.start_line}–${item.end_line}`;
 
+    field("prompt").textContent = item.prompt ?? MISSING_PROMPT;
     field("reference").textContent = item.reference_comment ?? "";
     field("prediction").textContent = item.comment_text ?? "";
     field("raw-response").textContent = item.raw_response ?? "";
@@ -685,23 +796,24 @@
     const done = field("done");
     done.checked = state.draft.done;
     done.addEventListener("change", () => {
-      updateDraft({ done: done.checked });
+      saveDraft({ done: done.checked });
       renderSidebar();
     });
 
-    const tagInput = field("tag-input");
-    tagInput.addEventListener("keydown", (event) => {
+    field("tag-input").addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
-      const tag = normalizeTag(tagInput.value);
-      tagInput.value = "";
-      if (tag && !state.draft.tags.includes(tag)) toggleTag(tag);
+      commitTagInput();
     });
 
     main.querySelector('[data-action="prev"]').addEventListener("click", () => goTo(state.position - 1));
     main.querySelector('[data-action="next"]').addEventListener("click", () => goTo(state.position + 1));
     main.querySelector('[data-action="next-todo"]').addEventListener("click", goToNextTodo);
     main.querySelector('[data-action="reveal"]').addEventListener("click", reveal);
+    main.querySelector('[data-action="copy-review"]').addEventListener("click", copyReview);
+    main.querySelectorAll("[data-copy]").forEach((button) => {
+      button.addEventListener("click", () => copyText(commentCopyText(item, button.dataset.copy), button));
+    });
     main.querySelectorAll("[data-mode]").forEach((button) => {
       button.addEventListener("click", () => setCodeMode(button.dataset.mode));
     });
@@ -709,7 +821,7 @@
 
   function reveal() {
     if (state.draft.revealed) return;
-    updateDraft({ revealed: true });
+    saveDraft({ revealed: true });
     renderBlinding(currentItem());
   }
 
@@ -721,6 +833,12 @@
   // ---------- Keyboard ----------
 
   document.addEventListener("keydown", (event) => {
+    // Checked before the typing guard so ⌘S works inside the notes and tag box.
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      saveNow();
+      return;
+    }
     const target = event.target;
     const typing = target.matches("input[type=text], textarea");
     if (event.key === "Escape" && typing) {
@@ -746,6 +864,7 @@
       3: () => setCodeMode("prediction"),
       t: () => field("tag-input").focus(),
       e: () => field("notes").focus(),
+      c: copyReview,
     };
     const action = actions[event.key];
     if (!action) return;

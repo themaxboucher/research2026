@@ -78,6 +78,7 @@ def _sample_item(
         "comment_text": result.get("comment_text"),
         "raw_response": result.get("raw_response"),
         "prompt_code": comment_generation.get("prompt_code"),
+        "prompt": comment_generation.get("prompt"),
     }
 
 
