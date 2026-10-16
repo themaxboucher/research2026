@@ -113,6 +113,14 @@
     margin-bottom: 12px;
   }
   .toolbar .spacer { flex: 1; }
+  .item-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg);
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
   button.btn {
     background: var(--panel);
     color: var(--text);
@@ -274,7 +282,7 @@
 </div>
 
 <template id="item-template">
-  <div class="toolbar">
+  <div class="toolbar item-toolbar">
     <button class="btn" data-action="prev">← Prev</button>
     <span data-field="position"></span>
     <button class="btn" data-action="next">Next →</button>
